@@ -30,9 +30,5 @@ ssh_key_names = [
 instances = {
   "kubuntu26-de" = {
     plan        = "vc2-1c-2gb"
-    region      = "lax"
-    os_name     = "Ubuntu 26.04 LTS x64"
-    user_scheme = "root"
-    docker      = true
   }
 }
