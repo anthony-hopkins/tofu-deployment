@@ -24,36 +24,14 @@ defaults = {
 # SSH keys must already exist in your Vultr account (Account -> SSH Keys).
 # Looked up by name, so a typo fails at plan time instead of locking you out.
 ssh_key_names = [
-  # "ahopkins-yubikey",
+  "kubuntu26-de",
 ]
 
 instances = {
-  # Everything is optional -- an empty object gets the full baseline above and
-  # is named <key>.dhs-labs.us.
-  #
-  # lab01 = {}
-
-  # Override only what differs.
-  #
-  # lab02 = {
-  #   plan           = "vhp-8c-24gb-amd"
-  #   extra_packages = ["tmux", "build-essential"]
-  # }
-  #
-  # lab03 = {
-  #   region  = "ewr"
-  #   os_name = "Ubuntu 24.04 LTS x64"
-  #   backups = true
-  #   backup_schedule = {
-  #     type = "daily"
-  #     hour = 4
-  #   }
-  # }
-  #
-  # Restore from a snapshot instead of a stock image. Get the ID from the
-  # snapshot workflow with action=list.
-  #
-  # lab04 = {
-  #   snapshot_id = "00000000-0000-0000-0000-000000000000"
-  # }
+  "kubuntu26-de" = {
+    plan        = "vc2-1c-2gb"
+    region      = "lax"
+    os_name     = "Ubuntu 26.04 LTS x64"
+    user_scheme = "root"
+    docker      = true
 }
