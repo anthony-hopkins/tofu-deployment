@@ -34,4 +34,5 @@ instances = {
     os_name     = "Ubuntu 26.04 LTS x64"
     user_scheme = "root"
     docker      = true
+  }
 }
