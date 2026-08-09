@@ -62,7 +62,7 @@ ok() { printf -- '- :white_check_mark: %s\n' "$*"; }
 account_section() {
   printf '## Account\n\n'
 
-  local account name email balance pending
+  local account name email balance pending credit
   if ! account="$(vultr_api GET /account 2>&1)"; then
     problem "Vultr API unreachable or the API key was rejected: ${account}"
     return 0
@@ -73,16 +73,22 @@ account_section() {
   balance="$(jq -r '.account.balance // 0' <<<"$account")"
   pending="$(jq -r '.account.pending_charges // 0' <<<"$account")"
 
+  # Vultr reports prepaid credit as a NEGATIVE balance -- their own API example
+  # is balance: -100.55 with pending_charges: 60.25. A POSITIVE balance is money
+  # owed. Present it the way the portal does rather than raw.
+  credit="$(awk "BEGIN{printf \"%.2f\", ($balance < 0) ? -($balance) : 0}")"
+
   printf '| Field | Value |\n|---|---|\n'
   printf '| Account | %s |\n' "$name"
   printf '| Email | %s |\n' "$email"
-  printf '| Balance | $%s |\n' "$balance"
-  printf '| Pending charges | $%s |\n\n' "$pending"
+  printf '| Credit remaining | $%s |\n' "$credit"
+  printf '| Pending charges | $%s |\n' "$pending"
+  printf '| Raw API balance | %s |\n\n' "$balance"
 
-  # Vultr balance is positive when in credit; a negative balance means money is
-  # owed and instances are at risk of suspension.
-  if awk "BEGIN{exit !($balance < 0)}"; then
-    problem "Account balance is negative (\$$balance). Instances can be suspended."
+  if awk "BEGIN{exit !($balance > 0)}"; then
+    problem "Account owes \$${balance}. Instances can be suspended."
+  elif awk "BEGIN{exit !($credit < $pending)}"; then
+    problem "Credit remaining (\$${credit}) is below pending charges (\$${pending}); top up before it runs out."
   fi
 }
 
