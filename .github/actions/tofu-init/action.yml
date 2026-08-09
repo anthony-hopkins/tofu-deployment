@@ -1,0 +1,78 @@
+name: tofu-init
+description: Install OpenTofu and initialise the Vultr Object Storage state backend.
+
+inputs:
+  tofu-version:
+    description: OpenTofu version to install.
+    required: false
+    default: "1.12.5"
+  bucket:
+    description: State bucket name (repository variable TFSTATE_BUCKET).
+    required: true
+  region:
+    description: SigV4 signing region (repository variable TFSTATE_REGION).
+    required: true
+  endpoint:
+    description: Vultr Object Storage endpoint URL (repository variable TFSTATE_ENDPOINT).
+    required: true
+
+runs:
+  using: composite
+
+  steps:
+    - name: Install OpenTofu
+      uses: opentofu/setup-opentofu@v1
+      with:
+        tofu_version: ${{ inputs.tofu-version }}
+        # The wrapper re-emits stdout through a shim, which corrupts
+        # `tofu output -json` when we capture it. We do our own logging.
+        tofu_wrapper: false
+        cache: true
+
+    - name: Write backend.hcl
+      shell: bash
+      env:
+        BUCKET: ${{ inputs.bucket }}
+        REGION: ${{ inputs.region }}
+        ENDPOINT: ${{ inputs.endpoint }}
+      run: |
+        set -euo pipefail
+
+        missing=0
+        for v in BUCKET REGION ENDPOINT; do
+          if [ -z "${!v:-}" ]; then
+            echo "::error::Repository variable TFSTATE_${v} is not set. See the 'GitHub setup' section of the README."
+            missing=1
+          fi
+        done
+        [ "$missing" -eq 0 ] || exit 1
+
+        cat >backend.hcl <<EOF
+        bucket = "${BUCKET}"
+        region = "${REGION}"
+
+        endpoints = {
+          s3 = "${ENDPOINT}"
+        }
+        EOF
+
+        echo "Generated backend.hcl:"
+        cat backend.hcl
+
+    # These two variable names are dictated by the AWS SDK that OpenTofu's
+    # S3-protocol backend is built on. The values are Vultr Object Storage
+    # keys and the traffic goes to *.vultrobjects.com -- no AWS involved.
+    - name: Verify Vultr Object Storage credentials are present
+      shell: bash
+      run: |
+        set -euo pipefail
+        for v in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY; do
+          if [ -z "${!v:-}" ]; then
+            echo "::error::${v} is empty. It carries your Vultr Object Storage key — set the TFSTATE_ACCESS_KEY / TFSTATE_SECRET_KEY repository secrets. Get them with: scripts/bootstrap-backend.sh --print-secrets"
+            exit 1
+          fi
+        done
+
+    - name: tofu init
+      shell: bash
+      run: tofu init -input=false -no-color -backend-config=backend.hcl

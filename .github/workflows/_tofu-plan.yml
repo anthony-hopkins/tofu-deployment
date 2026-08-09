@@ -1,0 +1,152 @@
+# Internal reusable workflow. Not meant to be run directly -- it is called by
+# the Plan, Apply and Destroy workflows so all three produce a plan the same
+# way. Deliberately carries no `concurrency:` block: the calling run already
+# holds the state lock group, and re-declaring it here would make the caller
+# wait on itself.
+
+name: (internal) tofu plan
+
+on:
+  workflow_call:
+    inputs:
+      instance:
+        description: Instance key to target, or "all".
+        type: string
+        default: all
+      refresh:
+        description: Refresh state against the Vultr API before planning.
+        type: boolean
+        default: true
+      destroy:
+        description: Produce a destroy plan instead of a create/update plan.
+        type: boolean
+        default: false
+      artifact-name:
+        description: Name of the uploaded plan artifact.
+        type: string
+        default: tofu-plan
+
+    outputs:
+      has_changes:
+        description: '"true" when the plan contains at least one change.'
+        value: ${{ jobs.plan.outputs.has_changes }}
+
+jobs:
+  plan:
+    name: Plan
+    runs-on: ubuntu-latest
+
+    outputs:
+      has_changes: ${{ steps.plan.outputs.has_changes }}
+
+    # Job level rather than workflow level: `secrets` is unambiguously
+    # available here, including in a reusable workflow called with
+    # `secrets: inherit`.
+    env:
+      VULTR_API_KEY: ${{ secrets.VULTR_API_KEY }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.TFSTATE_ACCESS_KEY }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.TFSTATE_SECRET_KEY }}
+      TF_IN_AUTOMATION: "1"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./.github/actions/tofu-init
+        with:
+          tofu-version: ${{ vars.TOFU_VERSION || '1.12.5' }}
+          bucket: ${{ vars.TFSTATE_BUCKET }}
+          region: ${{ vars.TFSTATE_REGION }}
+          endpoint: ${{ vars.TFSTATE_ENDPOINT }}
+
+      - name: Check formatting
+        run: tofu fmt -check -recursive -diff
+
+      - name: Validate configuration
+        run: tofu validate -no-color
+
+      - name: Plan
+        id: plan
+        env:
+          INSTANCE: ${{ inputs.instance }}
+          REFRESH: ${{ inputs.refresh }}
+          DESTROY: ${{ inputs.destroy }}
+        run: |
+          set -uo pipefail
+
+          args=(-input=false -no-color -lock-timeout=5m -out=tofu.plan)
+
+          [ "${REFRESH}" = "false" ] && args+=(-refresh=false)
+          [ "${DESTROY}" = "true" ]  && args+=(-destroy)
+
+          if [ -n "${INSTANCE}" ] && [ "${INSTANCE}" != "all" ]; then
+            # Validated rather than trusted: this value reaches a -target
+            # address, and the key charset is already constrained by the
+            # `instances` variable validation in variables.tf.
+            if ! printf '%s' "${INSTANCE}" | grep -qE '^[a-z0-9][a-z0-9-]{0,30}$'; then
+              echo "::error::Invalid instance key '${INSTANCE}'. Expected lowercase letters, digits and hyphens."
+              exit 1
+            fi
+            args+=("-target=vultr_instance.this[\"${INSTANCE}\"]")
+            echo "::warning::Targeted run: only vultr_instance.this[\"${INSTANCE}\"] is considered. Drift on every other instance is invisible to this plan."
+          fi
+
+          echo "tofu plan ${args[*]}"
+          tofu plan -detailed-exitcode "${args[@]}" 2>&1 | tee plan.txt
+          code=${PIPESTATUS[0]}
+
+          # -detailed-exitcode: 0 = no changes, 1 = error, 2 = changes present.
+          case "${code}" in
+            0) echo "has_changes=false" >>"$GITHUB_OUTPUT" ;;
+            2) echo "has_changes=true"  >>"$GITHUB_OUTPUT"; code=0 ;;
+            *) echo "has_changes=false" >>"$GITHUB_OUTPUT" ;;
+          esac
+
+          exit "${code}"
+
+      - name: Write job summary
+        if: always()
+        env:
+          INSTANCE: ${{ inputs.instance }}
+          DESTROY: ${{ inputs.destroy }}
+          CHANGES: ${{ steps.plan.outputs.has_changes }}
+        run: |
+          set -uo pipefail
+          {
+            if [ "${DESTROY}" = "true" ]; then
+              echo "## Destroy plan"
+            else
+              echo "## Plan"
+            fi
+            echo
+            echo "| Field | Value |"
+            echo "|---|---|"
+            echo "| Target | \`${INSTANCE}\` |"
+            echo "| Changes | \`${CHANGES:-unknown}\` |"
+            echo
+            echo "<details><summary>Full plan output</summary>"
+            echo
+            echo '```hcl'
+            # 60 KB keeps the summary under GitHub's 1 MB cap with room to spare.
+            head -c 60000 plan.txt 2>/dev/null || echo "(no plan output -- the plan step failed before producing any)"
+            if [ "$(wc -c <plan.txt 2>/dev/null || echo 0)" -gt 60000 ]; then
+              echo
+              echo "... truncated. Download the ${{ inputs.artifact-name }} artifact for the full output."
+            fi
+            echo '```'
+            echo
+            echo "</details>"
+          } >>"$GITHUB_STEP_SUMMARY"
+
+      - name: Upload plan
+        if: steps.plan.outputs.has_changes == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.artifact-name }}
+          path: |
+            tofu.plan
+            plan.txt
+          # A saved plan embeds resource attribute values. Nothing secret is
+          # planned here (Vultr generates passwords server-side, so they only
+          # appear in state, never in a plan), but keep the exposure short.
+          retention-days: 1
+          if-no-files-found: error

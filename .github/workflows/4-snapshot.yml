@@ -1,0 +1,165 @@
+name: 4 · Snapshot
+
+# Snapshot management. Talks to the Vultr API directly and never opens the
+# OpenTofu state, so it is safe to run while a plan or apply is in flight --
+# which is the point: you can snapshot before a risky change, or recover an
+# image even if state is broken.
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: What to do
+        type: choice
+        required: true
+        default: list
+        options:
+          - list
+          - create
+          - prune
+          - delete
+
+      instance:
+        description: 'Instance key. For create, "all" snapshots the whole fleet. Blank = all.'
+        type: string
+        default: all
+
+      note:
+        description: "create: optional note appended to the snapshot description"
+        type: string
+        default: ""
+
+      wait:
+        description: "create: block until the snapshot finishes uploading"
+        type: boolean
+        default: true
+
+      keep:
+        description: "prune: how many recent snapshots to keep per instance (required)"
+        type: string
+        default: "3"
+
+      older_than:
+        description: "prune: only delete snapshots older than this many days (blank = no age limit)"
+        type: string
+        default: ""
+
+      dry_run:
+        description: "prune: report what would be deleted without deleting it"
+        type: boolean
+        default: true
+
+      snapshot_id:
+        description: "delete: the snapshot UUID to delete"
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+# Its own group: snapshots do not touch OpenTofu state, so there is no reason
+# to queue behind a plan or apply.
+concurrency:
+  group: containerlabs-snapshots
+  cancel-in-progress: false
+
+jobs:
+  snapshot:
+    name: ${{ inputs.action }}
+    runs-on: ubuntu-latest
+
+    env:
+      VULTR_API_KEY: ${{ secrets.VULTR_API_KEY }}
+      PROJECT: ${{ vars.PROJECT || 'containerlabs' }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check the API key is present
+        run: |
+          set -euo pipefail
+          if [ -z "${VULTR_API_KEY:-}" ]; then
+            echo "::error::The VULTR_API_KEY repository secret is not set."
+            exit 1
+          fi
+
+      - name: Run
+        env:
+          ACTION: ${{ inputs.action }}
+          INSTANCE: ${{ inputs.instance }}
+          NOTE: ${{ inputs.note }}
+          WAIT: ${{ inputs.wait }}
+          KEEP: ${{ inputs.keep }}
+          OLDER_THAN: ${{ inputs.older_than }}
+          DRY_RUN: ${{ inputs.dry_run }}
+          SNAPSHOT_ID: ${{ inputs.snapshot_id }}
+        run: |
+          set -euo pipefail
+
+          # "all" and blank mean the same thing everywhere here.
+          targeted=0
+          if [ -n "${INSTANCE}" ] && [ "${INSTANCE}" != "all" ]; then
+            targeted=1
+          fi
+
+          args=()
+
+          case "${ACTION}" in
+            create)
+              args=(create)
+              if [ "${targeted}" -eq 1 ]; then
+                args+=(--instance "${INSTANCE}")
+              else
+                args+=(--all)
+              fi
+              if [ -n "${NOTE}" ]; then
+                args+=(--note "${NOTE}")
+              else
+                args+=(--note "manual run ${GITHUB_RUN_ID}")
+              fi
+              if [ "${WAIT}" = "true" ]; then
+                args+=(--wait)
+              fi
+              ;;
+
+            list)
+              args=(list)
+              if [ "${targeted}" -eq 1 ]; then
+                args+=(--instance "${INSTANCE}")
+              fi
+              ;;
+
+            prune)
+              if [ -z "${KEEP}" ]; then
+                echo "::error::'keep' is required for prune."
+                exit 1
+              fi
+              args=(prune --keep "${KEEP}")
+              if [ -n "${OLDER_THAN}" ]; then
+                args+=(--older-than "${OLDER_THAN}")
+              fi
+              if [ "${targeted}" -eq 1 ]; then
+                args+=(--instance "${INSTANCE}")
+              fi
+              if [ "${DRY_RUN}" = "true" ]; then
+                args+=(--dry-run)
+              else
+                args+=(--yes)
+              fi
+              ;;
+
+            delete)
+              if [ -z "${SNAPSHOT_ID}" ]; then
+                echo "::error::'snapshot_id' is required for delete."
+                exit 1
+              fi
+              args=(delete --id "${SNAPSHOT_ID}" --yes)
+              ;;
+
+            *)
+              echo "::error::Unknown action '${ACTION}'."
+              exit 1
+              ;;
+          esac
+
+          bash scripts/snapshot.sh "${args[@]}"

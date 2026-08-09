@@ -1,0 +1,169 @@
+name: 3 · Destroy
+
+# Destroys one instance, or the entire fleet.
+#
+# Three separate brakes, because this one is not undoable:
+#   1. a typed confirmation phrase that must match the target exactly
+#   2. a snapshot taken and waited on before anything is deleted (default on)
+#   3. the `containerlabs-destroy` environment, which you should protect with
+#      required reviewers
+
+on:
+  workflow_dispatch:
+    inputs:
+      instance:
+        description: 'Instance key to destroy, or "all" for the entire fleet'
+        type: string
+        required: true
+      confirm:
+        description: 'Type "destroy <instance>" exactly — e.g. destroy lab01'
+        type: string
+        required: true
+      snapshot_first:
+        description: Snapshot before destroying
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: containerlabs-tofu-state
+  cancel-in-progress: false
+
+jobs:
+  guard:
+    name: Confirm intent
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check the confirmation phrase
+        env:
+          INSTANCE: ${{ inputs.instance }}
+          CONFIRM: ${{ inputs.confirm }}
+        run: |
+          set -euo pipefail
+          expected="destroy ${INSTANCE}"
+
+          if [ "${CONFIRM}" != "${expected}" ]; then
+            echo "::error::Confirmation mismatch. Expected exactly '${expected}' but got '${CONFIRM}'. Nothing was touched."
+            exit 1
+          fi
+
+          if [ "${INSTANCE}" = "all" ]; then
+            echo "::warning::Confirmed destruction of the ENTIRE fleet."
+          else
+            echo "Confirmed destruction of '${INSTANCE}'."
+          fi
+
+  plan:
+    needs: guard
+    uses: ./.github/workflows/_tofu-plan.yml
+    secrets: inherit
+    with:
+      instance: ${{ inputs.instance }}
+      destroy: true
+      artifact-name: tofu-plan-destroy
+
+  destroy:
+    name: Destroy
+    needs: [guard, plan]
+    if: needs.plan.outputs.has_changes == 'true'
+    runs-on: ubuntu-latest
+
+    # Protect this environment with required reviewers.
+    environment: containerlabs-destroy
+
+    env:
+      VULTR_API_KEY: ${{ secrets.VULTR_API_KEY }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.TFSTATE_ACCESS_KEY }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.TFSTATE_SECRET_KEY }}
+      PROJECT: ${{ vars.PROJECT || 'containerlabs' }}
+      TF_IN_AUTOMATION: "1"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./.github/actions/tofu-init
+        with:
+          tofu-version: ${{ vars.TOFU_VERSION || '1.12.5' }}
+          bucket: ${{ vars.TFSTATE_BUCKET }}
+          region: ${{ vars.TFSTATE_REGION }}
+          endpoint: ${{ vars.TFSTATE_ENDPOINT }}
+
+      - name: Download the approved destroy plan
+        uses: actions/download-artifact@v4
+        with:
+          name: tofu-plan-destroy
+
+      # Runs before the destroy, and --wait blocks until the snapshot is
+      # actually uploaded. A snapshot still pending when the disk is deleted
+      # is not a backup.
+      - name: Snapshot before destroying
+        if: inputs.snapshot_first
+        env:
+          INSTANCE: ${{ inputs.instance }}
+        run: |
+          set -euo pipefail
+          note="pre-destroy run ${GITHUB_RUN_ID}"
+
+          if [ "${INSTANCE}" = "all" ]; then
+            bash scripts/snapshot.sh create --all --note "${note}" --wait
+          else
+            bash scripts/snapshot.sh create --instance "${INSTANCE}" --if-exists \
+              --note "${note}" --wait
+          fi
+
+      - name: Destroy
+        run: tofu apply -input=false -no-color -lock-timeout=5m tofu.plan
+
+      - name: Report
+        if: always()
+        env:
+          INSTANCE: ${{ inputs.instance }}
+          SNAPSHOT_FIRST: ${{ inputs.snapshot_first }}
+        run: |
+          set -uo pipefail
+          {
+            echo "## Destroyed"
+            echo
+            echo "Target: \`${INSTANCE}\`"
+            echo
+
+            if [ "${SNAPSHOT_FIRST}" = "true" ]; then
+              echo "A pre-destroy snapshot was taken. Recover by setting \`snapshot_id\` on an instance in \`instances.auto.tfvars\` and running **2 · Apply**."
+              echo
+              echo "Run **4 · Snapshot** with \`action: list\` to find the ID."
+            else
+              echo ":warning: No pre-destroy snapshot was taken. This data is gone."
+            fi
+
+            echo
+            echo "### Remaining fleet"
+            echo
+            if instances="$(tofu output -json instances 2>/dev/null)" && [ -n "${instances}" ]; then
+              echo "${instances}" | jq -r '
+                if (. | length) == 0 then
+                  "_The fleet is now empty._"
+                else
+                  "| Instance | Main IP | Region | Plan |",
+                  "|---|---|---|---|",
+                  (to_entries[] | "| `\(.key)` | `\(.value.main_ip)` | \(.value.region) | \(.value.plan) |")
+                end'
+            else
+              echo "_The fleet is now empty._"
+            fi
+          } >>"$GITHUB_STEP_SUMMARY"
+
+  nothing-to-do:
+    name: Nothing to destroy
+    needs: plan
+    if: needs.plan.outputs.has_changes != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Report
+        run: |
+          {
+            echo "## Nothing to destroy"
+            echo
+            echo "The destroy plan was empty — the target does not exist in state. Nothing was touched."
+          } >>"$GITHUB_STEP_SUMMARY"

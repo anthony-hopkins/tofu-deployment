@@ -1,0 +1,112 @@
+name: 1 · Plan
+
+# Read-only. Shows what an apply would do, without doing it.
+# Runs automatically on pull requests, and on demand from the Actions tab.
+
+on:
+  workflow_dispatch:
+    inputs:
+      instance:
+        description: 'Instance key to target, or "all" for the whole fleet'
+        type: string
+        default: all
+      refresh:
+        description: Refresh state against the live Vultr API before planning
+        type: boolean
+        default: true
+
+  pull_request:
+    paths:
+      - "**.tf"
+      - "**.tfvars"
+      - "templates/**"
+      - ".github/workflows/**"
+      - ".github/actions/**"
+
+permissions:
+  contents: read
+
+# Shared with Apply and Destroy so state operations never overlap.
+concurrency:
+  group: containerlabs-tofu-state
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    uses: ./.github/workflows/_tofu-plan.yml
+    secrets: inherit
+    with:
+      # On a pull_request event the inputs context is empty, so fall back.
+      instance: ${{ inputs.instance || 'all' }}
+      refresh: ${{ inputs.refresh != false }}
+
+  comment:
+    name: Comment on PR
+    needs: plan
+    if: always() && github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      - name: Fetch plan artifact
+        id: fetch
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: tofu-plan
+
+      - name: Post or update the plan comment
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+          RESULT: ${{ needs.plan.result }}
+          CHANGES: ${{ needs.plan.outputs.has_changes }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -uo pipefail
+
+          {
+            echo "<!-- containerlabs-plan -->"
+            echo "### OpenTofu plan — \`${RESULT}\`"
+            echo
+
+            case "${RESULT}" in
+              success)
+                if [ "${CHANGES}" = "true" ]; then
+                  echo "This PR **changes infrastructure**. Review the plan below, then run the **2 · Apply** workflow after merging."
+                else
+                  echo "No infrastructure changes."
+                fi
+                ;;
+              *)
+                echo ":x: The plan did not complete. See the run log."
+                ;;
+            esac
+
+            if [ -f plan.txt ]; then
+              echo
+              echo "<details><summary>Plan output</summary>"
+              echo
+              echo '```hcl'
+              # GitHub caps comment bodies at 65536 characters.
+              head -c 55000 plan.txt
+              if [ "$(wc -c <plan.txt)" -gt 55000 ]; then
+                echo
+                echo "... truncated, see the run for the full plan."
+              fi
+              echo '```'
+              echo
+              echo "</details>"
+            fi
+
+            echo
+            echo "[View run](${RUN_URL})"
+          } >comment.md
+
+          # Keep one rolling comment instead of one per push.
+          gh pr comment "${PR}" --repo "${REPO}" --body-file comment.md --edit-last \
+            || gh pr comment "${PR}" --repo "${REPO}" --body-file comment.md

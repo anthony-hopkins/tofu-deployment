@@ -1,0 +1,140 @@
+name: 2 · Apply (create / update)
+
+# Creates new instances and updates existing ones to match instances.auto.tfvars.
+#
+# Runs as two jobs on purpose: `plan` produces and publishes the plan, then
+# `apply` consumes that exact saved plan. If you protect the `containerlabs`
+# environment with required reviewers, the approver is looking at a plan that
+# has already been generated -- and OpenTofu refuses to apply it if the state
+# moved in the meantime.
+
+on:
+  workflow_dispatch:
+    inputs:
+      instance:
+        description: 'Instance key to target, or "all" for the whole fleet'
+        type: string
+        default: all
+      snapshot_first:
+        description: Snapshot the target before applying
+        type: boolean
+        default: false
+      refresh:
+        description: Refresh state against the live Vultr API before planning
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: containerlabs-tofu-state
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    uses: ./.github/workflows/_tofu-plan.yml
+    secrets: inherit
+    with:
+      instance: ${{ inputs.instance }}
+      refresh: ${{ inputs.refresh }}
+      artifact-name: tofu-plan-apply
+
+  apply:
+    name: Apply
+    needs: plan
+    if: needs.plan.outputs.has_changes == 'true'
+    runs-on: ubuntu-latest
+
+    # Add required reviewers to this environment in repository settings to make
+    # every apply a two-person operation.
+    environment: containerlabs
+
+    env:
+      VULTR_API_KEY: ${{ secrets.VULTR_API_KEY }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.TFSTATE_ACCESS_KEY }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.TFSTATE_SECRET_KEY }}
+      PROJECT: ${{ vars.PROJECT || 'containerlabs' }}
+      TF_IN_AUTOMATION: "1"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./.github/actions/tofu-init
+        with:
+          tofu-version: ${{ vars.TOFU_VERSION || '1.12.5' }}
+          bucket: ${{ vars.TFSTATE_BUCKET }}
+          region: ${{ vars.TFSTATE_REGION }}
+          endpoint: ${{ vars.TFSTATE_ENDPOINT }}
+
+      - name: Download the approved plan
+        uses: actions/download-artifact@v4
+        with:
+          name: tofu-plan-apply
+
+      - name: Snapshot before applying
+        if: inputs.snapshot_first
+        env:
+          INSTANCE: ${{ inputs.instance }}
+        run: |
+          set -euo pipefail
+          note="pre-apply run ${GITHUB_RUN_ID}"
+
+          if [ "${INSTANCE}" = "all" ]; then
+            bash scripts/snapshot.sh create --all --note "${note}" --wait
+          else
+            # --if-exists: a first-time create has nothing to snapshot yet.
+            bash scripts/snapshot.sh create --instance "${INSTANCE}" --if-exists \
+              --note "${note}" --wait
+          fi
+
+      - name: Apply
+        run: tofu apply -input=false -no-color -lock-timeout=5m tofu.plan
+
+      - name: Report
+        if: always()
+        run: |
+          set -uo pipefail
+          {
+            echo "## Applied"
+            echo
+
+            if instances="$(tofu output -json instances 2>/dev/null)" && [ -n "${instances}" ]; then
+              echo "${instances}" | jq -r '
+                if (. | length) == 0 then
+                  "_No instances are currently managed._"
+                else
+                  "| Instance | Main IP | IPv6 | Region | Plan | Status | Power |",
+                  "|---|---|---|---|---|---|---|",
+                  (to_entries[]
+                    | "| `\(.key)` | `\(.value.main_ip)` | `\(.value.v6_main_ip // "-")` | \(.value.region) | \(.value.plan) | \(.value.status) | \(.value.power_status) |")
+                end'
+            else
+              echo "_Could not read outputs._"
+            fi
+
+            echo
+            if ssh_cmds="$(tofu output -json ssh 2>/dev/null)" && [ -n "${ssh_cmds}" ]; then
+              echo "### Connect"
+              echo
+              echo '```console'
+              echo "${ssh_cmds}" | jq -r 'to_entries[] | "# \(.key)\n\(.value)"'
+              echo '```'
+              echo
+              echo "_A new instance needs a few minutes for cloud-init to finish installing Docker before SSH is useful._"
+            fi
+          } >>"$GITHUB_STEP_SUMMARY"
+
+  no-changes:
+    name: No changes
+    needs: plan
+    if: needs.plan.outputs.has_changes != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Report
+        run: |
+          {
+            echo "## No changes"
+            echo
+            echo "The plan found nothing to do — the fleet already matches \`instances.auto.tfvars\`. Nothing was applied."
+          } >>"$GITHUB_STEP_SUMMARY"

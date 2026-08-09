@@ -1,0 +1,152 @@
+name: 5 · Diagnose
+
+# Read-only health report. Changes nothing.
+#
+# Two independent jobs:
+#   report — Vultr API only (account, instance state, port probes, snapshot
+#            coverage, orphans). Never opens OpenTofu state, so it works even
+#            when state is locked or broken.
+#   drift  — optional `tofu plan` to answer "does reality still match the
+#            config?". Takes the state lock, so it is gated behind an input.
+
+on:
+  workflow_dispatch:
+    inputs:
+      instance:
+        description: "Limit the report to one instance key (blank = whole fleet)"
+        type: string
+        default: ""
+      ports:
+        description: Comma-separated TCP ports to probe on each instance
+        type: string
+        default: "22"
+      max_snapshot_age:
+        description: "Flag instances whose newest snapshot is older than N days (blank = don't check)"
+        type: string
+        default: ""
+      check_drift:
+        description: Also run a plan to detect configuration drift
+        type: boolean
+        default: true
+      fail_on_problem:
+        description: Fail the run when problems are found
+        type: boolean
+        default: true
+
+  # Uncomment to also get a report every morning.
+  # schedule:
+  #   - cron: "0 7 * * *"
+
+permissions:
+  contents: read
+
+jobs:
+  report:
+    name: Health report
+    runs-on: ubuntu-latest
+
+    env:
+      VULTR_API_KEY: ${{ secrets.VULTR_API_KEY }}
+      PROJECT: ${{ vars.PROJECT || 'containerlabs' }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Diagnose
+        env:
+          INSTANCE: ${{ inputs.instance }}
+          PORTS: ${{ inputs.ports || '22' }}
+          MAX_SNAPSHOT_AGE: ${{ inputs.max_snapshot_age }}
+          FAIL_ON_PROBLEM: ${{ inputs.fail_on_problem }}
+        run: |
+          set -euo pipefail
+
+          args=(--ports "${PORTS}")
+
+          if [ -n "${INSTANCE}" ]; then
+            args+=(--instance "${INSTANCE}")
+          fi
+          if [ -n "${MAX_SNAPSHOT_AGE}" ]; then
+            args+=(--max-snapshot-age "${MAX_SNAPSHOT_AGE}")
+          fi
+          # A scheduled run has no inputs; default to not failing there.
+          if [ "${FAIL_ON_PROBLEM}" != "true" ]; then
+            args+=(--no-fail)
+          fi
+
+          bash scripts/diagnose.sh "${args[@]}"
+
+  drift:
+    name: Drift check
+    if: inputs.check_drift
+    runs-on: ubuntu-latest
+
+    # Only this job touches state, so only this job queues behind
+    # plan / apply / destroy.
+    concurrency:
+      group: containerlabs-tofu-state
+      cancel-in-progress: false
+
+    env:
+      VULTR_API_KEY: ${{ secrets.VULTR_API_KEY }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.TFSTATE_ACCESS_KEY }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.TFSTATE_SECRET_KEY }}
+      TF_IN_AUTOMATION: "1"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./.github/actions/tofu-init
+        with:
+          tofu-version: ${{ vars.TOFU_VERSION || '1.12.5' }}
+          bucket: ${{ vars.TFSTATE_BUCKET }}
+          region: ${{ vars.TFSTATE_REGION }}
+          endpoint: ${{ vars.TFSTATE_ENDPOINT }}
+
+      - name: Validate configuration
+        run: |
+          tofu fmt -check -recursive -diff
+          tofu validate -no-color
+
+      - name: Plan for drift
+        id: drift
+        env:
+          FAIL_ON_PROBLEM: ${{ inputs.fail_on_problem }}
+        run: |
+          set -uo pipefail
+
+          tofu plan -detailed-exitcode -input=false -no-color -lock-timeout=5m 2>&1 | tee drift.txt
+          code=${PIPESTATUS[0]}
+
+          {
+            echo "## Drift check"
+            echo
+            case "${code}" in
+              0)
+                echo ":white_check_mark: **No drift.** The live fleet matches the configuration and state."
+                ;;
+              2)
+                echo ":warning: **Drift detected.** A plan would make changes — either someone changed something in the Vultr portal, or a config change has not been applied yet."
+                ;;
+              *)
+                echo ":x: **The plan failed.** See the output below."
+                ;;
+            esac
+            echo
+            echo "<details><summary>Plan output</summary>"
+            echo
+            echo '```hcl'
+            head -c 60000 drift.txt 2>/dev/null || true
+            echo '```'
+            echo
+            echo "</details>"
+          } >>"$GITHUB_STEP_SUMMARY"
+
+          # Drift is a finding, not a crash. Surface it as failure only when asked.
+          if [ "${code}" = "1" ]; then
+            exit 1
+          fi
+          if [ "${code}" = "2" ] && [ "${FAIL_ON_PROBLEM}" = "true" ]; then
+            exit 1
+          fi
+          exit 0

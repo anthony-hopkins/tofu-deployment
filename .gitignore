@@ -1,0 +1,28 @@
+.terraform/
+.terraform.tfstate.lock.info
+
+# State should only ever live in the object storage backend.
+*.tfstate
+*.tfstate.*
+
+# Plan files embed resource attribute values.
+*.tfplan
+tofu.plan
+plan.txt
+drift.txt
+
+# Generated from backend.hcl.example / bootstrap-backend.sh; contains the
+# bucket and endpoint, and is environment-specific.
+backend.hcl
+
+crash.log
+crash.*.log
+.env
+*.auto.tfvars.local
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# .terraform.lock.hcl is intentionally NOT ignored -- commit it so CI resolves
+# the same provider builds you tested against.

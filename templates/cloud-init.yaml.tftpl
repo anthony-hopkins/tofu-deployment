@@ -1,0 +1,103 @@
+#cloud-config
+# Managed by OpenTofu -- project=${project} instance=${instance_key}
+#
+# cloud-init only executes on FIRST BOOT. Editing this template and applying
+# updates the user data Vultr has on file but changes nothing on a running
+# machine; you must reinstall or rebuild the instance to re-run it.
+
+hostname: ${hostname}
+fqdn: ${fqdn}
+manage_etc_hosts: true
+
+package_update: true
+package_upgrade: true
+
+packages:
+  - ca-certificates
+  - curl
+  - gnupg
+  - git
+  - jq
+  - htop
+  - unattended-upgrades
+%{ for pkg in extra_packages ~}
+  - ${pkg}
+%{ endfor ~}
+
+write_files:
+  - path: /etc/containerlabs/metadata.json
+    permissions: "0644"
+    content: |
+      {
+        "project": "${project}",
+        "instance": "${instance_key}",
+        "hostname": "${hostname}",
+        "fqdn": "${fqdn}",
+        "docker": ${docker},
+        "managed_by": "opentofu"
+      }
+
+  # Key-only SSH. Vultr injects the authorized keys before this runs.
+  - path: /etc/ssh/sshd_config.d/99-containerlabs.conf
+    permissions: "0644"
+    content: |
+      PasswordAuthentication no
+      KbdInteractiveAuthentication no
+      PermitRootLogin prohibit-password
+
+%{ if docker ~}
+  - path: /etc/docker/daemon.json
+    permissions: "0644"
+    content: |
+      {
+        "log-driver": "json-file",
+        "log-opts": { "max-size": "10m", "max-file": "3" },
+        "live-restore": true
+      }
+
+  # Kept as a script rather than inline runcmd entries so the shell quoting
+  # survives YAML unmangled.
+  - path: /opt/containerlabs/install-docker.sh
+    permissions: "0755"
+    content: |
+      #!/usr/bin/env bash
+      set -euo pipefail
+
+      install -m 0755 -d /etc/apt/keyrings
+      curl -fsSL https://download.docker.com/linux/ubuntu/gpg \
+        -o /etc/apt/keyrings/docker.asc
+      chmod a+r /etc/apt/keyrings/docker.asc
+
+      . /etc/os-release
+      echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $${VERSION_CODENAME} stable" \
+        > /etc/apt/sources.list.d/docker.list
+
+      apt-get update -qq
+      DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
+        docker-ce docker-ce-cli containerd.io \
+        docker-buildx-plugin docker-compose-plugin
+
+      systemctl enable --now docker
+
+      # Vultr's "limited" user scheme creates linuxuser; harmless if absent.
+      if id linuxuser >/dev/null 2>&1; then
+        usermod -aG docker linuxuser
+      fi
+%{ endif ~}
+
+runcmd:
+%{ if docker ~}
+  - [bash, /opt/containerlabs/install-docker.sh]
+%{ endif ~}
+  - [systemctl, restart, ssh]
+  - [touch, /etc/containerlabs/ready]
+
+power_state:
+  mode: reboot
+  condition: test -f /var/run/reboot-required
+  delay: 1
+  message: Rebooting after cloud-init package upgrades
+%{ if extra != null }
+# ---- extra_cloud_init passthrough ----
+${extra}
+%{ endif ~}
