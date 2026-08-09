@@ -49,7 +49,7 @@ jobs:
       TF_IN_AUTOMATION: "1"
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: ./.github/actions/tofu-init
         with:
@@ -71,6 +71,12 @@ jobs:
           REFRESH: ${{ inputs.refresh }}
           DESTROY: ${{ inputs.destroy }}
         run: |
+          # GitHub Actions invokes run steps as `bash -e {0}`. tofu's
+          # -detailed-exitcode returns 2 for "there are changes", which is a
+          # normal outcome we translate to success below -- but errexit would
+          # kill the step on that 2 before the translation ever runs. Setting
+          # +e here is required; `set -uo pipefail` alone cannot undo it.
+          set +e
           set -uo pipefail
 
           args=(-input=false -no-color -lock-timeout=5m -out=tofu.plan)
@@ -139,7 +145,7 @@ jobs:
 
       - name: Upload plan
         if: steps.plan.outputs.has_changes == 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ inputs.artifact-name }}
           path: |

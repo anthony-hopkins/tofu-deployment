@@ -73,7 +73,7 @@ jobs:
       PROJECT: ${{ vars.PROJECT || 'containerlabs' }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Check the API key is present
         run: |

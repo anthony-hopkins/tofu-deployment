@@ -21,7 +21,7 @@ runs:
 
   steps:
     - name: Install OpenTofu
-      uses: opentofu/setup-opentofu@v1
+      uses: opentofu/setup-opentofu@v2
       with:
         tofu_version: ${{ inputs.tofu-version }}
         # The wrapper re-emits stdout through a shim, which corrupts

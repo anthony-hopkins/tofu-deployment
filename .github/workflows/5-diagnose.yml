@@ -50,7 +50,7 @@ jobs:
       PROJECT: ${{ vars.PROJECT || 'containerlabs' }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Diagnose
         env:
@@ -94,7 +94,7 @@ jobs:
       TF_IN_AUTOMATION: "1"
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: ./.github/actions/tofu-init
         with:
@@ -113,22 +113,46 @@ jobs:
         env:
           FAIL_ON_PROBLEM: ${{ inputs.fail_on_problem }}
         run: |
+          # See the note in _tofu-plan.yml: run steps are `bash -e {0}`, and
+          # -detailed-exitcode's 2 is an expected result, not a failure.
+          set +e
           set -uo pipefail
 
-          tofu plan -detailed-exitcode -input=false -no-color -lock-timeout=5m 2>&1 | tee drift.txt
+          tofu plan -detailed-exitcode -input=false -no-color -lock-timeout=5m \
+            -out=drift.plan 2>&1 | tee drift.txt
           code=${PIPESTATUS[0]}
+
+          # Exit 2 only means "the plan is not empty". On a fresh state that
+          # includes merely recording output values, which is not drift. Count
+          # actual resource changes so an empty fleet does not report a false
+          # positive on its first run.
+          resources=0
+          if [ -f drift.plan ]; then
+            resources="$(tofu show -json drift.plan 2>/dev/null \
+              | jq '[.resource_changes[]? | select(.change.actions != ["no-op"])] | length' 2>/dev/null || echo 0)"
+          fi
+          # Guard the arithmetic tests below against an empty or odd value.
+          case "${resources}" in ''|*[!0-9]*) resources=0 ;; esac
+
+          verdict=ok
+          [ "${code}" = "1" ] && verdict=error
+          [ "${code}" = "2" ] && [ "${resources}" -gt 0 ] && verdict=drift
+          [ "${code}" = "2" ] && [ "${resources}" -eq 0 ] && verdict=outputs
 
           {
             echo "## Drift check"
             echo
-            case "${code}" in
-              0)
+            case "${verdict}" in
+              ok)
                 echo ":white_check_mark: **No drift.** The live fleet matches the configuration and state."
                 ;;
-              2)
-                echo ":warning: **Drift detected.** A plan would make changes — either someone changed something in the Vultr portal, or a config change has not been applied yet."
+              outputs)
+                echo ":white_check_mark: **No resource drift.** The plan is non-empty, but only because it would record output values in state — no infrastructure would change. This is normal before the first apply."
                 ;;
-              *)
+              drift)
+                echo ":warning: **Drift detected — ${resources} resource change(s).** Either something was changed in the Vultr portal, or a config change has not been applied yet."
+                ;;
+              error)
                 echo ":x: **The plan failed.** See the output below."
                 ;;
             esac
@@ -142,11 +166,10 @@ jobs:
             echo "</details>"
           } >>"$GITHUB_STEP_SUMMARY"
 
-          # Drift is a finding, not a crash. Surface it as failure only when asked.
-          if [ "${code}" = "1" ]; then
-            exit 1
-          fi
-          if [ "${code}" = "2" ] && [ "${FAIL_ON_PROBLEM}" = "true" ]; then
+          # Drift is a finding, not a crash. Surface it as failure only when asked,
+          # and never for an output-only plan.
+          [ "${verdict}" = "error" ] && exit 1
+          if [ "${verdict}" = "drift" ] && [ "${FAIL_ON_PROBLEM}" = "true" ]; then
             exit 1
           fi
           exit 0
