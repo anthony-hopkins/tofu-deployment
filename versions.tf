@@ -6,8 +6,12 @@ terraform {
 
   required_providers {
     vultr = {
-      source  = "vultr/vultr"
-      version = "~> 2.26"
+      source = "vultr/vultr"
+      # >= 2.32, < 3.0. Not lower: main.tf sets `vpc_only`, which the provider
+      # only gained in v2.32.0 (2026-07-14). A looser constraint resolves to a
+      # version without that attribute, which is also what makes editor
+      # language servers report "Unexpected attribute: vpc_only".
+      version = "~> 2.32"
     }
   }
 }

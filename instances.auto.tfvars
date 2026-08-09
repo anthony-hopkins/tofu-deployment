@@ -29,6 +29,6 @@ ssh_key_names = [
 
 instances = {
   lab01 = {
-    plan        = "vc2-1c-2gb"
+    plan = "vc2-1c-2gb"
   }
 }

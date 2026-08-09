@@ -3,7 +3,7 @@
 
 provider "registry.opentofu.org/vultr/vultr" {
   version     = "2.32.0"
-  constraints = "~> 2.26"
+  constraints = "~> 2.32"
   hashes = [
     "h1:29428rojp9gIYgdhlr11x4pYyfLHn2JhKVAB3L4T4ro=",
     "h1:6XaZbXGHbuN7+ctmzDBE2/IizFNIsgiSqfF1tZC4ooE=",
