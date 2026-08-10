@@ -122,22 +122,39 @@ jobs:
             -out=drift.plan 2>&1 | tee drift.txt
           code=${PIPESTATUS[0]}
 
-          # Exit 2 only means "the plan is not empty". On a fresh state that
-          # includes merely recording output values, which is not drift. Count
-          # actual resource changes so an empty fleet does not report a false
-          # positive on its first run.
-          resources=0
-          if [ -f drift.plan ]; then
-            resources="$(tofu show -json drift.plan 2>/dev/null \
-              | jq '[.resource_changes[]? | select(.change.actions != ["no-op"])] | length' 2>/dev/null || echo 0)"
+          # Exit 2 only means "the plan is not empty", which covers three very
+          # different situations. Split the changes apart to tell them apart:
+          #   creates  -- resources in config that do not exist yet. Expected
+          #               between merging config and running 2 · Apply, so it
+          #               never fails the run.
+          #   modifies -- updates/replacements/deletes of resources that DO
+          #               exist in state: real drift (portal edits, or edits to
+          #               already-applied config).
+          #   neither  -- the plan would only record output values in state.
+          #               Normal before the first apply.
+          creates=0
+          modifies=0
+          if [ -f drift.plan ] && tofu show -json drift.plan >drift.json 2>/dev/null; then
+            creates="$(jq '[.resource_changes[]? | .change.actions
+              | select(. == ["create"])] | length' drift.json 2>/dev/null || echo 0)"
+            modifies="$(jq '[.resource_changes[]? | .change.actions
+              | select(. != ["no-op"] and . != ["create"] and . != ["read"])] | length' drift.json 2>/dev/null || echo 0)"
           fi
-          # Guard the arithmetic tests below against an empty or odd value.
-          case "${resources}" in ''|*[!0-9]*) resources=0 ;; esac
+          # Guard the arithmetic tests below against empty or odd values.
+          case "${creates}" in ''|*[!0-9]*) creates=0 ;; esac
+          case "${modifies}" in ''|*[!0-9]*) modifies=0 ;; esac
 
           verdict=ok
           [ "${code}" = "1" ] && verdict=error
-          [ "${code}" = "2" ] && [ "${resources}" -gt 0 ] && verdict=drift
-          [ "${code}" = "2" ] && [ "${resources}" -eq 0 ] && verdict=outputs
+          if [ "${code}" = "2" ]; then
+            if [ "${modifies}" -gt 0 ]; then
+              verdict=drift
+            elif [ "${creates}" -gt 0 ]; then
+              verdict=pending
+            else
+              verdict=outputs
+            fi
+          fi
 
           {
             echo "## Drift check"
@@ -149,8 +166,15 @@ jobs:
               outputs)
                 echo ":white_check_mark: **No resource drift.** The plan is non-empty, but only because it would record output values in state — no infrastructure would change. This is normal before the first apply."
                 ;;
+              pending)
+                echo ":hourglass_flowing_sand: **No drift — ${creates} pending create(s).** New configuration is waiting for its first apply; nothing that already exists would change. Run **2 · Apply** to create it. (Note: an instance deleted outside OpenTofu also reappears here as a create after the state refresh.)"
+                ;;
               drift)
-                echo ":warning: **Drift detected — ${resources} resource change(s).** Either something was changed in the Vultr portal, or a config change has not been applied yet."
+                echo ":warning: **Drift detected — ${modifies} change(s) to existing resources.** Either something was changed in the Vultr portal, or an edit to already-applied configuration has not been applied yet."
+                if [ "${creates}" -gt 0 ]; then
+                  echo
+                  echo "The plan also contains ${creates} pending create(s) — new, not-yet-applied configuration. Those alone would not fail this check."
+                fi
                 ;;
               error)
                 echo ":x: **The plan failed.** See the output below."
@@ -166,8 +190,9 @@ jobs:
             echo "</details>"
           } >>"$GITHUB_STEP_SUMMARY"
 
-          # Drift is a finding, not a crash. Surface it as failure only when asked,
-          # and never for an output-only plan.
+          # Drift is a finding, not a crash. Surface it as failure only when
+          # asked, and never for pending creates or an output-only plan --
+          # "not applied yet" is expected behavior, not a problem.
           [ "${verdict}" = "error" ] && exit 1
           if [ "${verdict}" = "drift" ] && [ "${FAIL_ON_PROBLEM}" = "true" ]; then
             exit 1
