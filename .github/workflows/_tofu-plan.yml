@@ -48,6 +48,12 @@ jobs:
       AWS_SECRET_ACCESS_KEY: ${{ secrets.TFSTATE_SECRET_KEY }}
       TF_IN_AUTOMATION: "1"
 
+      # Hostname and label for the instance. Unset arrives as "", which falls
+      # back to the "<key>.<dns_zone>" name derived in locals.tf. Changing it
+      # renames the machine in place -- unlike renaming the tfvars map key,
+      # which destroys and recreates it.
+      TF_VAR_instance_hostname: ${{ vars.HOSTNAME }}
+
       # cEOS lab image download, baked into cloud-init at plan time. Unset
       # repository variables arrive as "", which the config treats as
       # "feature off" -- a partial set fails the plan on purpose.

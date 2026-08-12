@@ -220,6 +220,7 @@ Variables:
 | `TFSTATE_REGION` | `us-east-1` | Signing region only. Vultr ignores it; it does **not** need to match your cluster. |
 | `TFSTATE_ENDPOINT` | `https://ewr1.vultrobjects.com` | Must match `endpoints.s3` in your generated `backend.hcl`. |
 | `PROJECT` | `containerlabs` | Optional. Must match `project` in tfvars. |
+| `HOSTNAME` | `clabs.dhs-labs.us` | Optional. Hostname **and** label for the instance. Unset falls back to `<key>.<dns_zone>`. Single-instance fleets only. |
 | `TOFU_VERSION` | `1.12.5` | Optional. Defaults to 1.12.5. |
 | `IMG_DIRECTORY` | `/opt/images` | Optional*. Directory cloud-init creates on docker-enabled instances, owned by the admin user. |
 | `IMG_ENDPOINT` | `https://ewr1.vultrobjects.com` | Optional*. Object storage endpoint hosting the cEOS image. |
@@ -247,6 +248,9 @@ gh secret set CLOUDFLARE_API_TOKEN   # optional: automatic A/AAAA record sync
 gh variable set TFSTATE_BUCKET   --body containerlabs-tfstate
 gh variable set TFSTATE_REGION   --body us-east-1
 gh variable set TFSTATE_ENDPOINT --body https://ewr1.vultrobjects.com
+
+# Optional: name the instance without renaming the tfvars key (which rebuilds).
+gh variable set HOSTNAME --body clabs.dhs-labs.us
 
 # Optional, all-or-nothing: cEOS image download on docker-enabled instances.
 gh secret set IMG_ACCESS_KEY
@@ -296,7 +300,7 @@ mechanics are proven. In [instances.auto.tfvars](instances.auto.tfvars):
 ssh_key_names = ["your-key-name"]     # required — see below
 
 instances = {
-  lab01 = {
+  clabs = {
     plan   = "vc2-1c-2gb"             # ~$0.015/hr instead of $0.099/hr
     region = "lax"
   }
@@ -321,23 +325,23 @@ Run all four remaining workflows in order. Together they cost a few cents.
    ssh root@<ip> 'cat /etc/containerlabs/metadata.json; ls /etc/containerlabs/ready; docker version'
    ```
    The `ready` marker is written last, so its presence means cloud-init finished.
-3. **4 · Snapshot** — `action: create`, `instance: lab01`, `wait: true`. Then
+3. **4 · Snapshot** — `action: create`, `instance: clabs`, `wait: true`. Then
    `action: list` to see it.
 4. **5 · Diagnose** — now with a real instance. Expect port 22 open and the
    fleet table populated.
-5. **3 · Destroy** — `instance: lab01`, `confirm: destroy lab01`,
+5. **3 · Destroy** — `instance: clabs`, `confirm: destroy clabs`,
    `snapshot_first: true`. Stops the billing.
 
 If all five pass, the system works.
 
 ### Step 9 — Switch to the real baseline
 
-Drop the `plan`/`region` overrides so `lab01` inherits `var.defaults`
+Drop the `plan`/`region` overrides so `clabs` inherits `var.defaults`
 (`vhp-4c-12gb-amd` in `lax`), or set them to whatever you actually want:
 
 ```hcl
 instances = {
-  lab01 = {}
+  clabs = {}
 }
 ```
 
@@ -345,7 +349,7 @@ PR → read the plan → merge → **2 · Apply**.
 
 Note that this **replaces** the instance rather than resizing it if the disk
 shrinks; the plan tells you which. With the `CLOUDFLARE_API_TOKEN` secret set,
-the apply workflow creates or updates the `lab01.dhs-labs.us` A and AAAA
+the apply workflow creates or updates the `clabs.dhs-labs.us` A and AAAA
 records automatically (`scripts/dns-sync.sh`), and the destroy workflow
 removes them; without it, the `dns_records` output lists what the fleet
 expects so you can reconcile by hand.
@@ -376,7 +380,7 @@ dns_zone = "dhs-labs.us"
 ssh_key_names = ["ahopkins-yubikey"]
 
 instances = {
-  lab01 = {}                                    # the full baseline
+  clabs = {}                                    # the full baseline
 
   lab02 = {                                     # bigger, with extras
     plan           = "vhp-8c-24gb-amd"
@@ -397,7 +401,7 @@ default re-plans every instance that has not overridden it. `plan` and `region`
 changes are resizes/moves where Vultr allows them; changing `os_name` rebuilds.
 
 **Naming.** With `dns_zone` set, hostname and label default to
-`<key>.<dns_zone>` — `lab01.dhs-labs.us`. Set `dns_zone = ""` to get
+`<key>.<dns_zone>` — `clabs.dhs-labs.us`. Set `dns_zone = ""` to get
 `<project>-<key>` instead. The HCL itself creates no DNS records;
 `scripts/dns-sync.sh` reconciles the `dns_records` output (A and AAAA)
 against Cloudflare — automatically after each workflow apply and destroy
@@ -407,9 +411,19 @@ against Cloudflare — automatically after each workflow apply and destroy
 records carrying that comment, so hand-made records in the zone are never
 touched.
 
-The map key (`lab01`) is the handle every workflow's `instance` input takes.
+The map key (`clabs`) is the handle every workflow's `instance` input takes.
 **Renaming a key destroys and recreates the machine** — to rename without
-rebuilding, set `label` and `hostname` instead.
+rebuilding, set `label` and `hostname` instead, or set the `HOSTNAME`
+repository variable.
+
+**`HOSTNAME`.** Set it and every naming default above is replaced by that one
+string — hostname, label, and the DNS record that follows from them — while the
+map key, the `instance:<key>` tag and the resource address all stay put, so the
+change is an in-place rename rather than a rebuild. Leave it unset and the
+derived `<key>.<dns_zone>` name applies. A per-instance `hostname`/`label` in
+tfvars still overrides it. Because it is a single string it only makes sense
+for a one-instance fleet; with more, the plan fails rather than pointing every
+machine at the same name.
 
 Discover valid values:
 
@@ -459,7 +473,7 @@ Inputs: `instance` (required), `confirm` (required), `snapshot_first`
 You must type the confirmation phrase exactly:
 
 ```
-instance: lab01          confirm: destroy lab01
+instance: clabs          confirm: destroy clabs
 instance: all            confirm: destroy all
 ```
 
@@ -509,7 +523,7 @@ Restores, on the other hand, *are* declarative:
 2. Set it on an instance:
 
    ```hcl
-   lab01 = {
+   clabs = {
      plan        = "vc2-2c-4gb"
      region      = "ewr"
      snapshot_id = "b1e2…"
@@ -628,7 +642,7 @@ the `~> 2.26` constraint):
 - `plan = vhp-4c-12gb-amd` exists, is available in `lax`, and is 4 vCPU /
   12288 MB / 260 GB AMD NVMe at $72/mo. `Ubuntu 26.04 LTS x64` exists as
   os_id 2760. Both checked against the live public Vultr catalogue.
-- The `defaults` inheritance was executed: a bare `lab01 = {}` resolves to the
+- The `defaults` inheritance was executed: a bare `clabs = {}` resolves to the
   full baseline, per-instance overrides win (including a deliberate `false`
   beating a `true` default), snapshot-restored instances are excluded from OS
   lookups, and OS/SSH-key lookups deduplicate.

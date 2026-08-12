@@ -16,7 +16,7 @@ on:
         type: string
         required: true
       confirm:
-        description: 'Type "destroy <instance>" exactly — e.g. destroy lab01'
+        description: 'Type "destroy <instance>" exactly — e.g. destroy clabs'
         type: string
         required: true
       snapshot_first:

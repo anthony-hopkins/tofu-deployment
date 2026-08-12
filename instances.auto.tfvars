@@ -28,5 +28,5 @@ ssh_key_names = [
 ]
 
 instances = {
-  lab01 = {}
+  clabs = {}
 }
