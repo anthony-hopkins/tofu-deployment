@@ -25,13 +25,13 @@ output "instances" {
 }
 
 output "ssh" {
-  description = "Ready-to-paste SSH commands. Vultr's \"limited\" user scheme creates `linuxuser`."
+  description = "Ready-to-paste SSH commands. Cloud-init disables root SSH login, so these use the admin user."
 
   value = {
     for k, r in vultr_instance.this : k =>
     format(
       "ssh %s@%s",
-      local.effective[k].user_scheme == "root" ? "root" : "linuxuser",
+      var.admin_user,
       r.main_ip != "" ? r.main_ip : r.v6_main_ip,
     )
     if !local.effective[k].vpc_only

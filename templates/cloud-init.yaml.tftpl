@@ -9,6 +9,37 @@ hostname: ${hostname}
 fqdn: ${fqdn}
 manage_etc_hosts: true
 
+%{ if docker ~}
+# Created here, before the users module runs, so ${admin_user} can be added to
+# it at creation time. docker-ce's postinst adopts the existing group.
+groups:
+  - docker
+
+%{ endif ~}
+users:
+  - default
+  - name: ${admin_user}
+    shell: /bin/bash
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    lock_passwd: false
+%{ if docker ~}
+    groups: [docker]
+%{ endif ~}
+    ssh_authorized_keys:
+%{ for key in ssh_public_keys ~}
+      - ${key}
+%{ endfor ~}
+
+# The random password is generated on the instance and printed only to the
+# serial console log (Vultr web console). SSH never accepts it -- password
+# auth is off -- so nobody needs to record it; it exists so the account is
+# not passwordless at the console.
+chpasswd:
+  expire: false
+  users:
+    - name: ${admin_user}
+      type: RAND
+
 package_update: true
 package_upgrade: true
 
@@ -37,13 +68,14 @@ write_files:
         "managed_by": "opentofu"
       }
 
-  # Key-only SSH. Vultr injects the authorized keys before this runs.
+  # Key-only SSH, and no root at all: ${admin_user} (created above with the
+  # account keys and passwordless sudo) is the way in.
   - path: /etc/ssh/sshd_config.d/99-containerlabs.conf
     permissions: "0644"
     content: |
       PasswordAuthentication no
       KbdInteractiveAuthentication no
-      PermitRootLogin prohibit-password
+      PermitRootLogin no
 
 %{ if docker ~}
   - path: /etc/docker/daemon.json

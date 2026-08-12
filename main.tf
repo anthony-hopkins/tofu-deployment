@@ -27,11 +27,17 @@ resource "vultr_instance" "this" {
   # updates the user data Vultr has on file but changes nothing on a running
   # instance until it is reinstalled or rebuilt.
   user_data = templatefile("${path.module}/templates/cloud-init.yaml.tftpl", {
-    project        = var.project
-    instance_key   = each.key
-    hostname       = each.value.short_hostname
-    fqdn           = each.value.fqdn
-    docker         = each.value.docker
+    project      = var.project
+    instance_key = each.key
+    hostname     = each.value.short_hostname
+    fqdn         = each.value.fqdn
+    docker       = each.value.docker
+
+    # Vultr only injects ssh_key_ids into root/linuxuser, so the admin user
+    # gets the same public keys planted via cloud-init.
+    admin_user      = var.admin_user
+    ssh_public_keys = [for n in each.value.ssh_key_names : trimspace(data.vultr_ssh_key.this[n].ssh_key)]
+
     extra_packages = each.value.extra_packages
     extra          = each.value.extra_cloud_init
   })
@@ -56,12 +62,13 @@ resource "vultr_instance" "this" {
   # Cross-field rules live here rather than in variable validation because they
   # need the value *after* var.defaults inheritance has been applied.
   lifecycle {
-    # Keys are required regardless of user_scheme: the cloud-init template sets
-    # PasswordAuthentication no on first boot, so the Vultr-generated password
-    # is useless over SSH. No key means the web console is the only way in.
+    # Keys are required regardless of user_scheme: the cloud-init template
+    # disables password authentication AND root SSH login on first boot, and
+    # these keys are what land in the admin user's authorized_keys. No key
+    # means the web console is the only way in.
     precondition {
       condition     = length(each.value.ssh_key_names) > 0
-      error_message = "Instance \"${each.key}\" has no SSH keys, and cloud-init disables password authentication on first boot -- you would be locked out to everything except the Vultr web console. Set ssh_key_names in instances.auto.tfvars (globally or on the instance) to a key name from Account -> SSH Keys."
+      error_message = "Instance \"${each.key}\" has no SSH keys, and cloud-init disables password authentication and root login on first boot -- \"${var.admin_user}\" would be unreachable except through the Vultr web console. Set ssh_key_names in instances.auto.tfvars (globally or on the instance) to a key name from Account -> SSH Keys."
     }
 
     precondition {

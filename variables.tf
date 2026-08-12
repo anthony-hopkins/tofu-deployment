@@ -60,6 +60,23 @@ variable "defaults" {
   }
 }
 
+variable "admin_user" {
+  description = <<-EOT
+    Admin account cloud-init creates on every instance. It receives the
+    instance's SSH public keys, passwordless sudo, docker group membership
+    (when docker is enabled), and a random password generated on the machine
+    itself -- printed only to the serial console, never stored in state. Root
+    SSH login is disabled in its favor.
+  EOT
+  type        = string
+  default     = "ahopkins"
+
+  validation {
+    condition     = can(regex("^[a-z_][a-z0-9_-]{0,31}$", var.admin_user))
+    error_message = "admin_user must be a valid Linux username: lowercase letters, digits, hyphens and underscores, at most 32 characters, not starting with a digit."
+  }
+}
+
 variable "vultr_rate_limit" {
   description = "Milliseconds the provider waits between Vultr API calls. Vultr allows ~30 calls/second."
   type        = number
