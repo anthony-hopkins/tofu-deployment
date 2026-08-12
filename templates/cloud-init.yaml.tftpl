@@ -152,8 +152,11 @@ write_files:
       # so they come in via `docker import`.
       docker import '${img.directory}/${img.name}' ceos:latest
 
-      # Only the imported image is kept; the tarball is a build remain.
+      # Only the imported image is kept; the tarball and the staging
+      # directory are build remains. -p sweeps empty parent directories too
+      # and never touches one that still has content.
       rm -f '${img.directory}/${img.name}'
+      rmdir -p --ignore-fail-on-non-empty '${img.directory}'
 %{ endif ~}
 %{ if course_repo != "" ~}
 

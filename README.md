@@ -228,9 +228,9 @@ Variables:
 
 \* The six `IMG_*` settings are all-or-nothing. Set every one and each
 docker-enabled instance downloads the cEOS image into `IMG_DIRECTORY` on first
-boot and imports it into Docker as `ceos:latest` (the tarball is removed after
-import -- only the image is kept); set none and the download is skipped; a
-partial set fails the plan. The credentials are baked into the
+boot and imports it into Docker as `ceos:latest` (the tarball and the staging
+directory are removed after import -- only the Docker image is kept); set none
+and the download is skipped; a partial set fails the plan. The credentials are baked into the
 instance's cloud-init user data, so treat user data (and saved plans) as
 sensitive once these are configured.
 

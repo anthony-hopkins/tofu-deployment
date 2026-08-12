@@ -96,7 +96,7 @@ variable "course_repo" {
 # six unset to skip it. A partial set fails the plan (precondition in main.tf).
 
 variable "img_directory" {
-  description = "Absolute path created on docker-enabled instances where the cEOS tarball is staged (GitHub variable IMG_DIRECTORY). Owned by var.admin_user; the tarball itself is removed after the docker import, leaving only the image."
+  description = "Absolute path where the cEOS tarball is staged on docker-enabled instances (GitHub variable IMG_DIRECTORY). Purely transient: the tarball and the directory are both removed after the docker import, leaving only the Docker image."
   type        = string
   default     = ""
 
