@@ -21,6 +21,34 @@ variable "dns_zone" {
   default     = "dhs-labs.us"
 }
 
+variable "instance_hostname" {
+  description = <<-EOT
+    Hostname and label for the instance, supplied by the HOSTNAME repository
+    variable in CI (TF_VAR_instance_hostname locally).
+
+    Overrides the derived "<key>.<dns_zone>" name without touching the map
+    key, so changing it renames the box in place. Renaming the key instead
+    would destroy and recreate it.
+
+    Leave unset ("") to keep the derived name. A per-instance `hostname` or
+    `label` in var.instances still wins over this.
+
+    Single-instance fleets only -- one string cannot name several machines.
+    The precondition in main.tf fails the plan rather than silently
+    collapsing the fleet onto one name.
+  EOT
+  type        = string
+  default     = ""
+
+  validation {
+    condition = var.instance_hostname == "" || can(regex(
+      "^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$",
+      var.instance_hostname
+    ))
+    error_message = "instance_hostname must be a DNS name: lowercase letters, digits, hyphens and dots, each label starting and ending alphanumerically."
+  }
+}
+
 variable "defaults" {
   description = <<-EOT
     The baseline every instance inherits unless it overrides the field.
@@ -165,13 +193,14 @@ variable "instances" {
   description = <<-EOT
     The lab fleet, keyed by short instance name.
 
-    Every field except the map key is optional: `lab01 = {}` gets you the full
+    Every field except the map key is optional: `clabs = {}` gets you the full
     var.defaults baseline. Set a field to override just that one.
 
     The map key is the for_each key, the DNS label, and the value stamped into
     the `instance:<key>` tag, which is how the snapshot and diagnose scripts
     find a machine. Renaming a key destroys and recreates the instance -- to
-    rename without rebuilding, set `label` and `hostname` instead.
+    rename without rebuilding, set `label` and `hostname` instead, or set the
+    HOSTNAME repository variable (var.instance_hostname).
   EOT
 
   type = map(object({

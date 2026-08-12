@@ -196,7 +196,7 @@ fleet_instances() {
 # instance_key -- read an instance object on stdin, print its tfvars key.
 #
 # The key comes from the `instance:<key>` tag that main.tf stamps on, not from
-# the label: labels are DNS names now (lab01.dhs-labs.us) and are freely
+# the label: labels are DNS names now (clabs.dhs-labs.us) and are freely
 # overridable per instance, so parsing them would be guesswork.
 instance_key() {
   jq -r '
@@ -205,7 +205,7 @@ instance_key() {
 }
 
 # resolve_instance NEEDLE [PROJECT]
-# Accepts a tfvars key (lab01), a full label or hostname (lab01.dhs-labs.us),
+# Accepts a tfvars key (clabs), a full label or hostname (clabs.dhs-labs.us),
 # or a raw Vultr instance UUID. Prints the instance object. Fails loudly on an
 # ambiguous needle rather than picking one arbitrarily.
 resolve_instance() {

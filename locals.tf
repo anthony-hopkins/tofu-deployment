@@ -16,13 +16,13 @@ locals {
       snapshot_id = cfg.snapshot_id
 
       # --- naming ----------------------------------------------------------
-      # "lab01.dhs-labs.us", or "containerlabs-lab01" when dns_zone is empty.
+      # "clabs.dhs-labs.us", or "containerlabs-clabs" when dns_zone is empty.
       fqdn  = coalesce(cfg.hostname, local.default_name[name])
       label = coalesce(cfg.label, local.default_name[name])
 
       # cloud-init wants the short name in `hostname` and the full name in
       # `fqdn`; handing it an FQDN for both produces a host called
-      # "lab01.dhs-labs.us" with a trailing-dot mess in /etc/hosts.
+      # "clabs.dhs-labs.us" with a trailing-dot mess in /etc/hosts.
       short_hostname = split(".", coalesce(cfg.hostname, local.default_name[name]))[0]
 
       # `instance:<key>` is what scripts/lib.sh resolves a machine by, so the
@@ -57,9 +57,15 @@ locals {
     }
   }
 
+  # The name an instance falls back to when it sets no hostname/label of its
+  # own. var.instance_hostname (the HOSTNAME repository variable) wins when
+  # set, which is what lets the name change without the map key -- and so
+  # without a destroy/recreate. main.tf holds it to a single-instance fleet.
   default_name = {
-    for name, _ in var.instances : name =>
-    var.dns_zone == "" ? "${var.project}-${name}" : "${name}.${var.dns_zone}"
+    for name, _ in var.instances : name => (
+      var.instance_hostname != "" ? var.instance_hostname :
+      var.dns_zone == "" ? "${var.project}-${name}" : "${name}.${var.dns_zone}"
+    )
   }
 
   # --- cEOS lab image ---------------------------------------------------------

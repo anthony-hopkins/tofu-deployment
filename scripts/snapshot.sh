@@ -29,7 +29,7 @@ Commands:
   create (--instance NAME | --all) [--note TEXT] [--wait] [--timeout SECONDS]
          [--if-exists]
       Snapshot one instance, or every instance in the project with --all.
-      NAME may be the tfvars key (lab01), the full label, the hostname, or a
+      NAME may be the tfvars key (clabs), the full label, the hostname, or a
       raw Vultr instance UUID. --if-exists turns "no such instance" into a
       no-op instead of an error, for pre-apply safety snapshots.
 

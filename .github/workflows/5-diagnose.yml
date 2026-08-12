@@ -93,6 +93,11 @@ jobs:
       AWS_SECRET_ACCESS_KEY: ${{ secrets.TFSTATE_SECRET_KEY }}
       TF_IN_AUTOMATION: "1"
 
+      # This job plans directly instead of calling _tofu-plan.yml, so it has
+      # to set the same naming variable. Without it the drift plan derives
+      # "<key>.<dns_zone>" and reports a hostname change that is not real.
+      TF_VAR_instance_hostname: ${{ vars.HOSTNAME }}
+
     steps:
       - uses: actions/checkout@v7
 

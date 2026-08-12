@@ -103,5 +103,13 @@ resource "vultr_instance" "this" {
       condition     = !each.value.disable_public_ipv4 || length(each.value.vpc_ids) > 0 || each.value.enable_ipv6
       error_message = "Instance \"${each.key}\" disables public IPv4 without a VPC or IPv6, which would make it unreachable."
     }
+
+    # var.instance_hostname is one string from a repository variable, so a
+    # multi-instance fleet would put every box on the same hostname, label
+    # and DNS record. Fail the plan instead.
+    precondition {
+      condition     = var.instance_hostname == "" || length(var.instances) == 1
+      error_message = "instance_hostname (HOSTNAME repository variable) is set to \"${var.instance_hostname}\", but the fleet has ${length(var.instances)} instances -- they would all take that one name. Clear HOSTNAME and set per-instance `hostname`/`label` in instances.auto.tfvars instead."
+    }
   }
 }
