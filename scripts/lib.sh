@@ -110,6 +110,73 @@ vultr_api_paged() {
   printf '%s\n' "$acc"
 }
 
+# --- Cloudflare API ----------------------------------------------------------
+
+CF_API_BASE="${CF_API_BASE:-https://api.cloudflare.com/client/v4}"
+
+# cf_api METHOD PATH [JSON_BODY]
+# Writes the response body to stdout. Aborts on a non-2xx response or a
+# `success: false` envelope, printing Cloudflare's error list so failures are
+# diagnosable from the run log.
+cf_api() {
+  local method="$1" path="$2" body="${3:-}"
+  local tmp status rc
+  tmp="$(mktemp)"
+
+  local args=(
+    --silent --show-error
+    --request "$method"
+    --output "$tmp"
+    --write-out '%{http_code}'
+    --max-time 60
+    --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"
+    --header "Content-Type: application/json"
+  )
+  [[ -n "$body" ]] && args+=(--data "$body")
+
+  set +e
+  status="$(curl "${args[@]}" "${CF_API_BASE}${path}")"
+  rc=$?
+  set -e
+
+  if ((rc != 0)); then
+    rm -f "$tmp"
+    die "curl failed (exit $rc) for $method $path"
+  fi
+
+  # Cloudflare wraps everything in {success, errors, result}; a 2xx with
+  # success=false does happen, so check both.
+  if [[ $status != 2* ]] || [[ "$(jq -r '.success' <"$tmp" 2>/dev/null)" != "true" ]]; then
+    local detail
+    detail="$(jq -r '[.errors[]? | "\(.code): \(.message)"] | join("; ")' <"$tmp" 2>/dev/null || true)"
+    [[ -n "$detail" ]] || detail="$(head -c 500 <"$tmp")"
+    rm -f "$tmp"
+    die "Cloudflare API $method $path returned HTTP $status: ${detail:-<empty body>}"
+  fi
+
+  cat "$tmp"
+  rm -f "$tmp"
+}
+
+# cf_api_paged PATH
+# Follows Cloudflare's page-number pagination and prints a single JSON array
+# of every element found under `result` across all pages.
+cf_api_paged() {
+  local path="$1"
+  local page=1 total=1 acc="[]" resp sep
+
+  while ((page <= total)); do
+    [[ $path == *\?* ]] && sep='&' || sep='?'
+    resp="$(cf_api GET "${path}${sep}per_page=100&page=${page}")"
+
+    acc="$(jq -c --argjson acc "$acc" '$acc + (.result // [])' <<<"$resp")"
+    total="$(jq -r '.result_info.total_pages // 1' <<<"$resp")"
+    page=$((page + 1))
+  done
+
+  printf '%s\n' "$acc"
+}
+
 # --- fleet lookup ------------------------------------------------------------
 
 # fleet_instances [PROJECT]

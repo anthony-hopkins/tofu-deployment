@@ -40,13 +40,19 @@ output "ssh" {
 
 output "dns_records" {
   description = <<-EOT
-    The A records these instances expect to exist. Nothing here creates them --
-    this is the list to reconcile against your DNS provider by hand.
+    The A/AAAA records these instances expect to exist, keyed by hostname then
+    record type. scripts/dns-sync.sh reconciles this map against Cloudflare --
+    the apply and destroy workflows run it automatically when the
+    CLOUDFLARE_API_TOKEN secret is set, and `make dns` runs the same sync
+    locally. A hostname mapping to an empty object means "this instance wants
+    no public records", which is what lets the prune retire them.
   EOT
 
   value = {
-    for k, r in vultr_instance.this : r.hostname => r.main_ip
-    if r.main_ip != ""
+    for k, r in vultr_instance.this : r.hostname => {
+      for t, ip in { A = r.main_ip, AAAA = r.v6_main_ip } : t => ip
+      if ip != ""
+    }
   }
 }
 

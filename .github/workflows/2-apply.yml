@@ -91,6 +91,22 @@ jobs:
       - name: Apply
         run: tofu apply -input=false -no-color -lock-timeout=5m tofu.plan
 
+      # Reconcile Cloudflare A/AAAA records with what was just applied: create
+      # records for new instances, update drifted IPs, prune records the fleet
+      # no longer wants (only ones stamped with this project's ownership
+      # comment -- hand-made records are never touched). Skipped cleanly until
+      # the CLOUDFLARE_API_TOKEN secret is configured.
+      - name: Sync Cloudflare DNS
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${CLOUDFLARE_API_TOKEN}" ]; then
+            echo "CLOUDFLARE_API_TOKEN secret not configured -- skipping DNS sync."
+            exit 0
+          fi
+          bash scripts/dns-sync.sh --prune
+
       - name: Report
         if: always()
         run: |

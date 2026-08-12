@@ -6,7 +6,7 @@ PROJECT ?= containerlabs
 
 export PROJECT
 
-.PHONY: help init bootstrap objstore check fmt plan apply destroy snapshot snapshots prune diagnose regions plans os lint
+.PHONY: help init bootstrap objstore check fmt plan apply destroy snapshot snapshots prune diagnose dns regions plans os lint
 
 help: ## Show this help
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -56,6 +56,9 @@ prune: ## Dry-run a prune keeping the 3 newest per instance (KEEP=n to change)
 
 diagnose: ## Read-only health report
 	bash scripts/diagnose.sh
+
+dns: ## Sync Cloudflare A/AAAA records to the fleet (DRY_RUN=1 to preview)
+	bash scripts/dns-sync.sh --prune $(if $(DRY_RUN),--dry-run,)
 
 # --- Vultr catalogue (public endpoints, no API key needed) -------------------
 

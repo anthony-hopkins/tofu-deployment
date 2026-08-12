@@ -116,6 +116,26 @@ jobs:
       - name: Destroy
         run: tofu apply -input=false -no-color -lock-timeout=5m tofu.plan
 
+      # The instances are gone; retire the A/AAAA records that pointed at
+      # them. Desired state is whatever remains in the state file, so a
+      # single-instance destroy prunes just that instance's records. After a
+      # full destroy the dns_records output no longer exists -- an empty map
+      # there means "prune every record this project owns", which is exactly
+      # right. Only records stamped with the ownership comment are candidates;
+      # hand-made records are never touched. Skipped cleanly until the
+      # CLOUDFLARE_API_TOKEN secret is configured.
+      - name: Sync Cloudflare DNS
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${CLOUDFLARE_API_TOKEN}" ]; then
+            echo "CLOUDFLARE_API_TOKEN secret not configured -- skipping DNS cleanup."
+            exit 0
+          fi
+          records="$(tofu output -json dns_records 2>/dev/null || echo '{}')"
+          bash scripts/dns-sync.sh --records-json - --prune <<<"${records}"
+
       - name: Report
         if: always()
         env:

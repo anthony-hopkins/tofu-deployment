@@ -202,8 +202,13 @@ Secrets:
 | `VULTR_API_KEY` | Your Vultr API key |
 | `TFSTATE_ACCESS_KEY` | Vultr Object Storage S3 access key |
 | `TFSTATE_SECRET_KEY` | Vultr Object Storage S3 secret key |
+| `CLOUDFLARE_API_TOKEN` | Optional. Enables automatic A/AAAA record sync; needs **Zone:Read + DNS:Edit** on the zone. |
 
-The last two come from `scripts/bootstrap-backend.sh --print-secrets`.
+The state keys come from `scripts/bootstrap-backend.sh --print-secrets`. The
+Cloudflare token is created at **My Profile → API Tokens** with the *Edit zone
+DNS* template plus `Zone → Zone → Read`, scoped to your zone; until it is set,
+the apply workflow skips the DNS step and prints the records for you to
+reconcile by hand.
 
 Variables:
 
@@ -221,6 +226,7 @@ Or from the CLI:
 gh secret set VULTR_API_KEY
 gh secret set TFSTATE_ACCESS_KEY
 gh secret set TFSTATE_SECRET_KEY
+gh secret set CLOUDFLARE_API_TOKEN   # optional: automatic A/AAAA record sync
 gh variable set TFSTATE_BUCKET   --body containerlabs-tfstate
 gh variable set TFSTATE_REGION   --body us-east-1
 gh variable set TFSTATE_ENDPOINT --body https://ewr1.vultrobjects.com
@@ -313,9 +319,11 @@ instances = {
 PR → read the plan → merge → **2 · Apply**.
 
 Note that this **replaces** the instance rather than resizing it if the disk
-shrinks; the plan tells you which. Add the A record for
-`lab01.dhs-labs.us` at your DNS provider — the `dns_records` output lists what
-the fleet expects. Nothing here writes DNS.
+shrinks; the plan tells you which. With the `CLOUDFLARE_API_TOKEN` secret set,
+the apply workflow creates or updates the `lab01.dhs-labs.us` A and AAAA
+records automatically (`scripts/dns-sync.sh`), and the destroy workflow
+removes them; without it, the `dns_records` output lists what the fleet
+expects so you can reconcile by hand.
 
 ---
 
@@ -365,8 +373,14 @@ changes are resizes/moves where Vultr allows them; changing `os_name` rebuilds.
 
 **Naming.** With `dns_zone` set, hostname and label default to
 `<key>.<dns_zone>` — `lab01.dhs-labs.us`. Set `dns_zone = ""` to get
-`<project>-<key>` instead. Nothing here creates DNS records; the `dns_records`
-output lists the A records the fleet expects so you can reconcile them yourself.
+`<project>-<key>` instead. The HCL itself creates no DNS records;
+`scripts/dns-sync.sh` reconciles the `dns_records` output (A and AAAA)
+against Cloudflare — automatically after each workflow apply and destroy
+(once the `CLOUDFLARE_API_TOKEN` secret is set), or on demand with `make dns`
+(`DRY_RUN=1` to preview). Records it creates carry a
+`managed-by:opentofu:<project>` comment, and its `--prune` only ever deletes
+records carrying that comment, so hand-made records in the zone are never
+touched.
 
 The map key (`lab01`) is the handle every workflow's `instance` input takes.
 **Renaming a key destroys and recreates the machine** — to rename without
