@@ -148,11 +148,12 @@ write_files:
         -o '${img.directory}/${img.name}' \
         'https://${img.host}/${img.bucket}/${img.name}'
 
-      chown ${admin_user}:${admin_user} '${img.directory}/${img.name}'
-
       # cEOS tarballs are root filesystem archives, not `docker save` output,
       # so they come in via `docker import`.
       docker import '${img.directory}/${img.name}' ceos:latest
+
+      # Only the imported image is kept; the tarball is a build remain.
+      rm -f '${img.directory}/${img.name}'
 %{ endif ~}
 %{ if course_repo != "" ~}
 
@@ -165,12 +166,14 @@ write_files:
       REPO_URL='${course_repo}'
       DEST="/home/${admin_user}/$(basename "$REPO_URL" .git)"
 
-      # Cloned as ${admin_user} so the working tree is theirs to pull and edit.
       if [ ! -d "$DEST/.git" ]; then
         sudo -u ${admin_user} git clone "$REPO_URL" "$DEST"
       fi
 
       docker build -t netcourse-host:latest "$DEST/common/host-image/"
+
+      # The clone only exists to feed the build; re-clone to hack on it.
+      rm -rf "$DEST"
 %{ endif ~}
 %{ endif ~}
 
@@ -184,6 +187,11 @@ runcmd:
 %{ if course_repo != "" ~}
   - [bash, /opt/containerlabs/build-course-image.sh]
 %{ endif ~}
+  # Keep only the images: drop the build cache, dangling layers and the
+  # one-shot scripts (fetch-ceos.sh embeds the object storage credentials).
+  - [docker, builder, prune, -af]
+  - [docker, image, prune, -f]
+  - [bash, -c, "rm -f /opt/containerlabs/*.sh"]
 %{ endif ~}
   - [systemctl, restart, ssh]
   - [touch, /etc/containerlabs/ready]

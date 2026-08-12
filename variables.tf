@@ -82,7 +82,8 @@ variable "course_repo" {
     Git repository cloud-init clones into the admin user's home on
     docker-enabled instances (public URL, no auth). Its common/host-image/
     directory is built as the netcourse-host:latest Docker image on first
-    boot. Set to "" to skip the clone and build.
+    boot, then the clone is removed -- only the image is kept. Set to "" to
+    skip the clone and build.
   EOT
   type        = string
   default     = "https://github.com/anthony-hopkins/network-course.git"
@@ -95,7 +96,7 @@ variable "course_repo" {
 # six unset to skip it. A partial set fails the plan (precondition in main.tf).
 
 variable "img_directory" {
-  description = "Absolute path created on docker-enabled instances to hold lab images (GitHub variable IMG_DIRECTORY). Owned by var.admin_user."
+  description = "Absolute path created on docker-enabled instances where the cEOS tarball is staged (GitHub variable IMG_DIRECTORY). Owned by var.admin_user; the tarball itself is removed after the docker import, leaving only the image."
   type        = string
   default     = ""
 
