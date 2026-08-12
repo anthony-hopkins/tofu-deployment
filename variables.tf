@@ -77,6 +77,17 @@ variable "admin_user" {
   }
 }
 
+variable "course_repo" {
+  description = <<-EOT
+    Git repository cloud-init clones into the admin user's home on
+    docker-enabled instances (public URL, no auth). Its common/host-image/
+    directory is built as the netcourse-host:latest Docker image on first
+    boot. Set to "" to skip the clone and build.
+  EOT
+  type        = string
+  default     = "https://github.com/anthony-hopkins/network-course.git"
+}
+
 # --- cEOS lab image (IMG_* repository variables) -----------------------------
 # In CI these arrive as TF_VAR_img_* from the GitHub repository variables and
 # secrets of the same (upper-case) names. They are all-or-nothing: set all six

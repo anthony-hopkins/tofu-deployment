@@ -154,6 +154,24 @@ write_files:
       # so they come in via `docker import`.
       docker import '${img.directory}/${img.name}' ceos:latest
 %{ endif ~}
+%{ if course_repo != "" ~}
+
+  - path: /opt/containerlabs/build-course-image.sh
+    permissions: "0755"
+    content: |
+      #!/usr/bin/env bash
+      set -euo pipefail
+
+      REPO_URL='${course_repo}'
+      DEST="/home/${admin_user}/$(basename "$REPO_URL" .git)"
+
+      # Cloned as ${admin_user} so the working tree is theirs to pull and edit.
+      if [ ! -d "$DEST/.git" ]; then
+        sudo -u ${admin_user} git clone "$REPO_URL" "$DEST"
+      fi
+
+      docker build -t netcourse-host:latest "$DEST/common/host-image/"
+%{ endif ~}
 %{ endif ~}
 
 runcmd:
@@ -162,6 +180,9 @@ runcmd:
   - [bash, /opt/containerlabs/install-containerlab.sh]
 %{ if img != null ~}
   - [bash, /opt/containerlabs/fetch-ceos.sh]
+%{ endif ~}
+%{ if course_repo != "" ~}
+  - [bash, /opt/containerlabs/build-course-image.sh]
 %{ endif ~}
 %{ endif ~}
   - [systemctl, restart, ssh]

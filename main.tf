@@ -50,6 +50,8 @@ resource "vultr_instance" "this" {
       secret_key = var.img_secret_key
     } : null
 
+    course_repo = var.course_repo
+
     extra_packages = each.value.extra_packages
     extra          = each.value.extra_cloud_init
   })
