@@ -119,7 +119,7 @@ variable "img_bucket" {
 }
 
 variable "img_name" {
-  description = "Object key of the cEOS image tarball, e.g. cEOS64-lab-4.32.2F.tar.xz (GitHub variable IMG_NAME). Also the filename it lands under in img_directory."
+  description = "Object key of the cEOS image tarball, e.g. cEOS64-lab-4.32.2F.tar.xz (GitHub variable IMG_NAME). Also the filename it lands under in img_directory, and the source of the version tag: the release in the name (4.32.2F) becomes a ceos:<version> tag alongside ceos:latest."
   type        = string
   default     = ""
 }

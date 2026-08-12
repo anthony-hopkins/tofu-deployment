@@ -151,6 +151,13 @@ write_files:
       # cEOS tarballs are root filesystem archives, not `docker save` output,
       # so they come in via `docker import`.
       docker import '${img.directory}/${img.name}' ceos:latest
+%{ if img.version != "" ~}
+
+      # Course topologies pin the release tag (image: ceos:${img.version}).
+      # With only ceos:latest present, docker would go looking for that
+      # reference on Docker Hub, where no public ceos repository exists.
+      docker tag ceos:latest 'ceos:${img.version}'
+%{ endif ~}
 
       # Only the imported image is kept; the tarball and the staging
       # directory are build remains. -p sweeps empty parent directories too

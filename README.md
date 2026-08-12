@@ -228,9 +228,12 @@ Variables:
 
 \* The six `IMG_*` settings are all-or-nothing. Set every one and each
 docker-enabled instance downloads the cEOS image into `IMG_DIRECTORY` on first
-boot and imports it into Docker as `ceos:latest` (the tarball and the staging
-directory are removed after import -- only the Docker image is kept); set none
-and the download is skipped; a partial set fails the plan. The credentials are baked into the
+boot and imports it into Docker as `ceos:latest`, plus a `ceos:<version>` tag
+parsed from `IMG_NAME` (`cEOS64-lab-4.32.2F.tar.xz` -> `ceos:4.32.2F`) so
+course topologies that pin the release resolve locally instead of reaching for
+Docker Hub. The tarball and the staging directory are removed after import --
+only the Docker image is kept. Set none of the six and the download is
+skipped; a partial set fails the plan. The credentials are baked into the
 instance's cloud-init user data, so treat user data (and saved plans) as
 sensitive once these are configured.
 

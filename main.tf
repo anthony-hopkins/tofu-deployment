@@ -46,6 +46,7 @@ resource "vultr_instance" "this" {
       region     = local.img_region
       bucket     = var.img_bucket
       name       = var.img_name
+      version    = local.img_version
       access_key = var.img_access_key
       secret_key = var.img_secret_key
     } : null

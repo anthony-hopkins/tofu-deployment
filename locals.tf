@@ -83,6 +83,12 @@ locals {
   img_host   = trimsuffix(trimprefix(trimprefix(var.img_endpoint, "https://"), "http://"), "/")
   img_region = split(".", local.img_host)[0]
 
+  # The EOS release carried in the tarball name (cEOS64-lab-4.36.0F.tar.xz ->
+  # 4.36.0F). Course topologies pin their image reference to it, so cloud-init
+  # tags the import with it alongside ceos:latest. Empty when the name holds
+  # no parseable version; the import then only gets ceos:latest.
+  img_version = try(regex("\\d+(?:\\.\\d+)+[A-Z]*", var.img_name), "")
+
   # Distinct lookups only: an OS or key shared by ten instances is fetched once.
   os_names = toset([
     for name, e in local.effective : e.os_name
