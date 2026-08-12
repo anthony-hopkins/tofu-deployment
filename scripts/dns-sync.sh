@@ -29,7 +29,7 @@ PROJECT="${PROJECT:-containerlabs}"
 RECORDS_JSON=""
 PRUNE=0
 DRY_RUN=0
-TTL=60
+TTL=120
 PROXIED=false
 
 usage() {
@@ -42,7 +42,7 @@ Usage: dns-sync.sh [options]
   --prune              Delete A/AAAA records tagged
                        managed-by:opentofu:<project> that the fleet no longer
                        wants.
-  --ttl SECONDS        TTL for created/updated records (default: 60).
+  --ttl SECONDS        TTL for created/updated records (default: 120).
   --proxied            Create records proxied through Cloudflare
                        (default: DNS only; forces TTL to auto).
   --dry-run            Print what would change without touching Cloudflare.
