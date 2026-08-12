@@ -62,6 +62,27 @@ locals {
     var.dns_zone == "" ? "${var.project}-${name}" : "${name}.${var.dns_zone}"
   }
 
+  # --- cEOS lab image ---------------------------------------------------------
+  # img_enabled/img_disabled feed the all-or-nothing precondition in main.tf;
+  # only img_enabled turns the download on in the cloud-init template.
+  img_settings = {
+    IMG_DIRECTORY  = var.img_directory
+    IMG_ENDPOINT   = var.img_endpoint
+    IMG_BUCKET     = var.img_bucket
+    IMG_NAME       = var.img_name
+    IMG_ACCESS_KEY = var.img_access_key
+    IMG_SECRET_KEY = var.img_secret_key
+  }
+
+  img_enabled  = alltrue([for v in values(local.img_settings) : v != ""])
+  img_disabled = alltrue([for v in values(local.img_settings) : v == ""])
+
+  # The README documents TFSTATE_ENDPOINT with its https:// scheme, so accept
+  # the same shape here. curl needs the bare host, and its --aws-sigv4 signing
+  # region is the endpoint's first DNS label (ewr1.vultrobjects.com -> ewr1).
+  img_host   = trimsuffix(trimprefix(trimprefix(var.img_endpoint, "https://"), "http://"), "/")
+  img_region = split(".", local.img_host)[0]
+
   # Distinct lookups only: an OS or key shared by ten instances is fetched once.
   os_names = toset([
     for name, e in local.effective : e.os_name

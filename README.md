@@ -203,6 +203,8 @@ Secrets:
 | `TFSTATE_ACCESS_KEY` | Vultr Object Storage S3 access key |
 | `TFSTATE_SECRET_KEY` | Vultr Object Storage S3 secret key |
 | `CLOUDFLARE_API_TOKEN` | Optional. Enables automatic A/AAAA record sync; needs **Zone:Read + DNS:Edit** on the zone. |
+| `IMG_ACCESS_KEY` | Optional*. Vultr Object Storage access key for the cEOS image bucket. |
+| `IMG_SECRET_KEY` | Optional*. Vultr Object Storage secret key for the cEOS image bucket. |
 
 The state keys come from `scripts/bootstrap-backend.sh --print-secrets`. The
 Cloudflare token is created at **My Profile → API Tokens** with the *Edit zone
@@ -219,6 +221,17 @@ Variables:
 | `TFSTATE_ENDPOINT` | `https://ewr1.vultrobjects.com` | Must match `endpoints.s3` in your generated `backend.hcl`. |
 | `PROJECT` | `containerlabs` | Optional. Must match `project` in tfvars. |
 | `TOFU_VERSION` | `1.12.5` | Optional. Defaults to 1.12.5. |
+| `IMG_DIRECTORY` | `/opt/images` | Optional*. Directory cloud-init creates on docker-enabled instances, owned by the admin user. |
+| `IMG_ENDPOINT` | `https://ewr1.vultrobjects.com` | Optional*. Object storage endpoint hosting the cEOS image. |
+| `IMG_BUCKET` | `lab-images` | Optional*. Bucket holding the cEOS image. |
+| `IMG_NAME` | `cEOS64-lab-4.32.2F.tar.xz` | Optional*. Object key; also the filename under `IMG_DIRECTORY`. |
+
+\* The six `IMG_*` settings are all-or-nothing. Set every one and each
+docker-enabled instance downloads the cEOS image into `IMG_DIRECTORY` on first
+boot and imports it into Docker as `ceos:latest`; set none and the download is
+skipped; a partial set fails the plan. The credentials are baked into the
+instance's cloud-init user data, so treat user data (and saved plans) as
+sensitive once these are configured.
 
 Or from the CLI:
 
@@ -230,6 +243,14 @@ gh secret set CLOUDFLARE_API_TOKEN   # optional: automatic A/AAAA record sync
 gh variable set TFSTATE_BUCKET   --body containerlabs-tfstate
 gh variable set TFSTATE_REGION   --body us-east-1
 gh variable set TFSTATE_ENDPOINT --body https://ewr1.vultrobjects.com
+
+# Optional, all-or-nothing: cEOS image download on docker-enabled instances.
+gh secret set IMG_ACCESS_KEY
+gh secret set IMG_SECRET_KEY
+gh variable set IMG_DIRECTORY --body /opt/images
+gh variable set IMG_ENDPOINT  --body https://ewr1.vultrobjects.com
+gh variable set IMG_BUCKET    --body lab-images
+gh variable set IMG_NAME      --body cEOS64-lab-4.32.2F.tar.xz
 ```
 
 ### Step 5 — Environments (the approval gate)

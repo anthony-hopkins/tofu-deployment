@@ -115,11 +115,54 @@ write_files:
       if id linuxuser >/dev/null 2>&1; then
         usermod -aG docker linuxuser
       fi
+
+  - path: /opt/containerlabs/install-containerlab.sh
+    permissions: "0755"
+    content: |
+      #!/usr/bin/env bash
+      set -euo pipefail
+
+      # Containerlab's apt repository (Gemfury) publishes no signing key;
+      # trusted=yes is the documented install path.
+      echo "deb [trusted=yes] https://netdevops.fury.site/apt/ /" \
+        > /etc/apt/sources.list.d/netdevops.list
+
+      apt-get update -qq
+      DEBIAN_FRONTEND=noninteractive apt-get install -y -qq containerlab
+%{ if img != null ~}
+
+  # Root-only: this script embeds the object storage credentials.
+  - path: /opt/containerlabs/fetch-ceos.sh
+    permissions: "0700"
+    content: |
+      #!/usr/bin/env bash
+      set -euo pipefail
+
+      install -d -m 0755 -o ${admin_user} -g ${admin_user} '${img.directory}'
+
+      # Signed S3 GET via curl's SigV4 support -- no aws-cli needed. The
+      # signing region is the endpoint's first DNS label.
+      curl -fsSL --retry 3 --retry-delay 5 \
+        --user '${img.access_key}:${img.secret_key}' \
+        --aws-sigv4 "aws:amz:${img.region}:s3" \
+        -o '${img.directory}/${img.name}' \
+        'https://${img.host}/${img.bucket}/${img.name}'
+
+      chown ${admin_user}:${admin_user} '${img.directory}/${img.name}'
+
+      # cEOS tarballs are root filesystem archives, not `docker save` output,
+      # so they come in via `docker import`.
+      docker import '${img.directory}/${img.name}' ceos:latest
+%{ endif ~}
 %{ endif ~}
 
 runcmd:
 %{ if docker ~}
   - [bash, /opt/containerlabs/install-docker.sh]
+  - [bash, /opt/containerlabs/install-containerlab.sh]
+%{ if img != null ~}
+  - [bash, /opt/containerlabs/fetch-ceos.sh]
+%{ endif ~}
 %{ endif ~}
   - [systemctl, restart, ssh]
   - [touch, /etc/containerlabs/ready]

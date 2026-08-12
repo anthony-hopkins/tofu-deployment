@@ -77,6 +77,55 @@ variable "admin_user" {
   }
 }
 
+# --- cEOS lab image (IMG_* repository variables) -----------------------------
+# In CI these arrive as TF_VAR_img_* from the GitHub repository variables and
+# secrets of the same (upper-case) names. They are all-or-nothing: set all six
+# to have cloud-init download the image on docker-enabled instances, leave all
+# six unset to skip it. A partial set fails the plan (precondition in main.tf).
+
+variable "img_directory" {
+  description = "Absolute path created on docker-enabled instances to hold lab images (GitHub variable IMG_DIRECTORY). Owned by var.admin_user."
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = var.img_directory == "" || startswith(var.img_directory, "/")
+    error_message = "img_directory must be an absolute path, e.g. /opt/images."
+  }
+}
+
+variable "img_endpoint" {
+  description = "Vultr Object Storage endpoint hosting the cEOS image, with or without the https:// scheme, e.g. \"https://ewr1.vultrobjects.com\" (GitHub variable IMG_ENDPOINT)."
+  type        = string
+  default     = ""
+}
+
+variable "img_bucket" {
+  description = "Object storage bucket holding the cEOS image (GitHub variable IMG_BUCKET)."
+  type        = string
+  default     = ""
+}
+
+variable "img_name" {
+  description = "Object key of the cEOS image tarball, e.g. cEOS64-lab-4.32.2F.tar.xz (GitHub variable IMG_NAME). Also the filename it lands under in img_directory."
+  type        = string
+  default     = ""
+}
+
+variable "img_access_key" {
+  description = "Object storage access key for the image bucket (GitHub secret IMG_ACCESS_KEY). Embedded in cloud-init user data -- treat instance user data as sensitive."
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
+variable "img_secret_key" {
+  description = "Object storage secret key for the image bucket (GitHub secret IMG_SECRET_KEY). Embedded in cloud-init user data -- treat instance user data as sensitive."
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
 variable "vultr_rate_limit" {
   description = "Milliseconds the provider waits between Vultr API calls. Vultr allows ~30 calls/second."
   type        = number

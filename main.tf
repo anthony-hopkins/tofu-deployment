@@ -38,6 +38,18 @@ resource "vultr_instance" "this" {
     admin_user      = var.admin_user
     ssh_public_keys = [for n in each.value.ssh_key_names : trimspace(data.vultr_ssh_key.this[n].ssh_key)]
 
+    # null when the IMG_* variables are unset; the template then renders no
+    # image directory, download script or docker import.
+    img = local.img_enabled ? {
+      directory  = var.img_directory
+      host       = local.img_host
+      region     = local.img_region
+      bucket     = var.img_bucket
+      name       = var.img_name
+      access_key = var.img_access_key
+      secret_key = var.img_secret_key
+    } : null
+
     extra_packages = each.value.extra_packages
     extra          = each.value.extra_cloud_init
   })
@@ -74,6 +86,14 @@ resource "vultr_instance" "this" {
     precondition {
       condition     = each.value.backup_schedule == null || each.value.backups
       error_message = "Instance \"${each.key}\" sets backup_schedule but resolves to backups = false. Set backups = true on the instance, or in var.defaults."
+    }
+
+    # The cEOS image settings are all-or-nothing. Failing the plan on a
+    # partial set beats silently skipping the download and shipping labs
+    # without their image.
+    precondition {
+      condition     = local.img_enabled || local.img_disabled
+      error_message = "The cEOS image settings are partially configured. Set all of IMG_DIRECTORY, IMG_ENDPOINT, IMG_BUCKET, IMG_NAME (repository variables) and IMG_ACCESS_KEY, IMG_SECRET_KEY (repository secrets) -- TF_VAR_img_* locally -- or none of them."
     }
 
     precondition {

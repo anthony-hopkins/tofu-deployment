@@ -48,6 +48,16 @@ jobs:
       AWS_SECRET_ACCESS_KEY: ${{ secrets.TFSTATE_SECRET_KEY }}
       TF_IN_AUTOMATION: "1"
 
+      # cEOS lab image download, baked into cloud-init at plan time. Unset
+      # repository variables arrive as "", which the config treats as
+      # "feature off" -- a partial set fails the plan on purpose.
+      TF_VAR_img_directory: ${{ vars.IMG_DIRECTORY }}
+      TF_VAR_img_endpoint: ${{ vars.IMG_ENDPOINT }}
+      TF_VAR_img_bucket: ${{ vars.IMG_BUCKET }}
+      TF_VAR_img_name: ${{ vars.IMG_NAME }}
+      TF_VAR_img_access_key: ${{ secrets.IMG_ACCESS_KEY }}
+      TF_VAR_img_secret_key: ${{ secrets.IMG_SECRET_KEY }}
+
     steps:
       - uses: actions/checkout@v7
 
@@ -151,8 +161,8 @@ jobs:
           path: |
             tofu.plan
             plan.txt
-          # A saved plan embeds resource attribute values. Nothing secret is
-          # planned here (Vultr generates passwords server-side, so they only
-          # appear in state, never in a plan), but keep the exposure short.
+          # A saved plan embeds resource attribute values -- including the
+          # object storage credentials baked into user_data when the IMG_*
+          # settings are configured -- so keep the exposure short.
           retention-days: 1
           if-no-files-found: error
