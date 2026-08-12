@@ -82,7 +82,7 @@ variable "course_repo" {
     Git repository cloud-init clones into the admin user's home on
     docker-enabled instances (public URL, no auth). Its common/host-image/
     directory is built as the netcourse-host:latest Docker image on first
-    boot, then the clone is removed -- only the image is kept. Set to "" to
+    boot; the clone stays in the home directory afterwards. Set to "" to
     skip the clone and build.
   EOT
   type        = string

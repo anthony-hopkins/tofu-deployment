@@ -166,14 +166,13 @@ write_files:
       REPO_URL='${course_repo}'
       DEST="/home/${admin_user}/$(basename "$REPO_URL" .git)"
 
+      # Cloned as ${admin_user} and kept after the build: the working tree in
+      # their home is part of the course setup, theirs to pull and edit.
       if [ ! -d "$DEST/.git" ]; then
         sudo -u ${admin_user} git clone "$REPO_URL" "$DEST"
       fi
 
       docker build -t netcourse-host:latest "$DEST/common/host-image/"
-
-      # The clone only exists to feed the build; re-clone to hack on it.
-      rm -rf "$DEST"
 %{ endif ~}
 %{ endif ~}
 
