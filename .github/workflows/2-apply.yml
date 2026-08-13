@@ -3,7 +3,7 @@ name: 2 · Apply (create / update)
 # Creates new instances and updates existing ones to match instances.auto.tfvars.
 #
 # Runs as two jobs on purpose: `plan` produces and publishes the plan, then
-# `apply` consumes that exact saved plan. If you protect the `containerlabs`
+# `apply` consumes that exact saved plan. If you protect the `crackbox`
 # environment with required reviewers, the approver is looking at a plan that
 # has already been generated -- and OpenTofu refuses to apply it if the state
 # moved in the meantime.
@@ -28,7 +28,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: containerlabs-tofu-state
+  group: crackbox-tofu-state
   cancel-in-progress: false
 
 jobs:
@@ -48,13 +48,13 @@ jobs:
 
     # Add required reviewers to this environment in repository settings to make
     # every apply a two-person operation.
-    environment: containerlabs
+    environment: crackbox
 
     env:
       VULTR_API_KEY: ${{ secrets.VULTR_API_KEY }}
       AWS_ACCESS_KEY_ID: ${{ secrets.TFSTATE_ACCESS_KEY }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.TFSTATE_SECRET_KEY }}
-      PROJECT: ${{ vars.PROJECT || 'containerlabs' }}
+      PROJECT: ${{ vars.PROJECT || 'crackbox' }}
       TF_IN_AUTOMATION: "1"
 
     steps:
@@ -137,7 +137,7 @@ jobs:
               echo "${ssh_cmds}" | jq -r 'to_entries[] | "# \(.key)\n\(.value)"'
               echo '```'
               echo
-              echo "_A new instance needs a few minutes for cloud-init to finish installing Docker before SSH is useful._"
+              echo "_A new instance needs a few minutes for cloud-init to install hashcat and mount the data disk, and considerably longer if it is downloading a dictionary corpus. \`/etc/crackbox/ready\` appears when it is done._"
             fi
           } >>"$GITHUB_STEP_SUMMARY"
 

@@ -48,15 +48,15 @@ jobs:
       AWS_SECRET_ACCESS_KEY: ${{ secrets.TFSTATE_SECRET_KEY }}
       TF_IN_AUTOMATION: "1"
 
-      # cEOS lab image download, baked into cloud-init at plan time. Unset
+      # Dictionary corpus download, baked into cloud-init at plan time. Unset
       # repository variables arrive as "", which the config treats as
       # "feature off" -- a partial set fails the plan on purpose.
-      TF_VAR_img_directory: ${{ vars.IMG_DIRECTORY }}
-      TF_VAR_img_endpoint: ${{ vars.IMG_ENDPOINT }}
-      TF_VAR_img_bucket: ${{ vars.IMG_BUCKET }}
-      TF_VAR_img_name: ${{ vars.IMG_NAME }}
-      TF_VAR_img_access_key: ${{ secrets.IMG_ACCESS_KEY }}
-      TF_VAR_img_secret_key: ${{ secrets.IMG_SECRET_KEY }}
+      TF_VAR_wordlist_directory: ${{ vars.WORDLIST_DIRECTORY }}
+      TF_VAR_wordlist_endpoint: ${{ vars.WORDLIST_ENDPOINT }}
+      TF_VAR_wordlist_bucket: ${{ vars.WORDLIST_BUCKET }}
+      TF_VAR_wordlist_names: ${{ vars.WORDLIST_NAMES }}
+      TF_VAR_wordlist_access_key: ${{ secrets.WORDLIST_ACCESS_KEY }}
+      TF_VAR_wordlist_secret_key: ${{ secrets.WORDLIST_SECRET_KEY }}
 
     steps:
       - uses: actions/checkout@v7
@@ -162,7 +162,7 @@ jobs:
             tofu.plan
             plan.txt
           # A saved plan embeds resource attribute values -- including the
-          # object storage credentials baked into user_data when the IMG_*
+          # object storage credentials baked into user_data when the WORDLIST_*
           # settings are configured -- so keep the exposure short.
           retention-days: 1
           if-no-files-found: error

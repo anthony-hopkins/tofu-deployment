@@ -28,7 +28,7 @@ permissions:
 
 # Shared with Apply and Destroy so state operations never overlap.
 concurrency:
-  group: containerlabs-tofu-state
+  group: crackbox-tofu-state
   cancel-in-progress: false
 
 jobs:
@@ -70,7 +70,7 @@ jobs:
           set -uo pipefail
 
           {
-            echo "<!-- containerlabs-plan -->"
+            echo "<!-- crackbox-plan -->"
             echo "### OpenTofu plan — \`${RESULT}\`"
             echo
 

@@ -2,7 +2,7 @@ SHELL := /usr/bin/env bash
 .DEFAULT_GOAL := help
 
 TOFU    ?= tofu
-PROJECT ?= containerlabs
+PROJECT ?= crackbox
 
 export PROJECT
 
@@ -67,9 +67,9 @@ regions: ## List Vultr regions
 	  | jq -r '.regions[] | [.id, "\(.city), \(.country)"] | @tsv' \
 	  | column -t -s $$'\t'
 
-plans: ## List plans available in REGION (default lax). e.g. make plans REGION=ewr
+plans: ## List plans available in REGION (default sea). e.g. make plans REGION=ewr
 	@curl -fsSL 'https://api.vultr.com/v2/plans?per_page=500' \
-	  | jq -r --arg r '$(or $(REGION),lax)' \
+	  | jq -r --arg r '$(or $(REGION),sea)' \
 	      '.plans[] | select(.locations | index($$r)) | [.id, .type, (.cpu_vendor // "-"), "\(.vcpu_count) vCPU", "\(.ram) MB", "\(.disk) GB", "$$\(.monthly_cost)/mo"] | @tsv' \
 	  | sort -t $$'\t' -k7 -n \
 	  | column -t -s $$'\t'

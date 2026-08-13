@@ -60,7 +60,7 @@ permissions:
 # Its own group: snapshots do not touch OpenTofu state, so there is no reason
 # to queue behind a plan or apply.
 concurrency:
-  group: containerlabs-snapshots
+  group: crackbox-snapshots
   cancel-in-progress: false
 
 jobs:
@@ -70,7 +70,7 @@ jobs:
 
     env:
       VULTR_API_KEY: ${{ secrets.VULTR_API_KEY }}
-      PROJECT: ${{ vars.PROJECT || 'containerlabs' }}
+      PROJECT: ${{ vars.PROJECT || 'crackbox' }}
 
     steps:
       - uses: actions/checkout@v7

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Snapshot management for the containerlabs fleet.
+# Snapshot management for the crackbox fleet.
 #
 # Snapshots are deliberately NOT OpenTofu resources. Taking one is an event, not
 # a piece of desired state: modelling it as a resource means every snapshot you
@@ -19,7 +19,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source=./lib.sh
 . "${ROOT}/scripts/lib.sh"
 
-PROJECT="${PROJECT:-containerlabs}"
+PROJECT="${PROJECT:-crackbox}"
 
 usage() {
   cat <<'EOF'
@@ -29,7 +29,7 @@ Commands:
   create (--instance NAME | --all) [--note TEXT] [--wait] [--timeout SECONDS]
          [--if-exists]
       Snapshot one instance, or every instance in the project with --all.
-      NAME may be the tfvars key (lab01), the full label, the hostname, or a
+      NAME may be the tfvars key (crack01), the full label, the hostname, or a
       raw Vultr instance UUID. --if-exists turns "no such instance" into a
       no-op instead of an error, for pre-apply safety snapshots.
 
@@ -50,7 +50,7 @@ Commands:
 
 Environment:
   VULTR_API_KEY   required
-  PROJECT         project tag/prefix (default: containerlabs)
+  PROJECT         project tag/prefix (default: crackbox)
 EOF
 }
 

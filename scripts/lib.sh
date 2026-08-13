@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Shared helpers for the containerlabs operational scripts.
+# Shared helpers for the crackbox operational scripts.
 # Source it, do not execute it:  . "$(dirname "$0")/lib.sh"
 
 VULTR_API_BASE="${VULTR_API_BASE:-https://api.vultr.com/v2}"
@@ -184,7 +184,7 @@ cf_api_paged() {
 # managed-by:opentofu tag that main.tf stamps on every instance. Anything not
 # carrying that tag is invisible to these scripts by design.
 fleet_instances() {
-  local project="${1:-${PROJECT:-containerlabs}}"
+  local project="${1:-${PROJECT:-crackbox}}"
   vultr_api_paged /instances instances |
     jq -c --arg p "$project" '
       [ .[]
@@ -196,7 +196,7 @@ fleet_instances() {
 # instance_key -- read an instance object on stdin, print its tfvars key.
 #
 # The key comes from the `instance:<key>` tag that main.tf stamps on, not from
-# the label: labels are DNS names now (lab01.dhs-labs.us) and are freely
+# the label: labels are DNS names now (crack01.dhs-labs.us) and are freely
 # overridable per instance, so parsing them would be guesswork.
 instance_key() {
   jq -r '
@@ -205,11 +205,11 @@ instance_key() {
 }
 
 # resolve_instance NEEDLE [PROJECT]
-# Accepts a tfvars key (lab01), a full label or hostname (lab01.dhs-labs.us),
+# Accepts a tfvars key (crack01), a full label or hostname (crack01.dhs-labs.us),
 # or a raw Vultr instance UUID. Prints the instance object. Fails loudly on an
 # ambiguous needle rather than picking one arbitrarily.
 resolve_instance() {
-  local needle="$1" project="${2:-${PROJECT:-containerlabs}}"
+  local needle="$1" project="${2:-${PROJECT:-crackbox}}"
   local all matches count
 
   all="$(fleet_instances "$project")"

@@ -9,22 +9,12 @@ hostname: ${hostname}
 fqdn: ${fqdn}
 manage_etc_hosts: true
 
-%{ if docker ~}
-# Created here, before the users module runs, so ${admin_user} can be added to
-# it at creation time. docker-ce's postinst adopts the existing group.
-groups:
-  - docker
-
-%{ endif ~}
 users:
   - default
   - name: ${admin_user}
     shell: /bin/bash
     sudo: ALL=(ALL) NOPASSWD:ALL
     lock_passwd: false
-%{ if docker ~}
-    groups: [docker]
-%{ endif ~}
     ssh_authorized_keys:
 %{ for key in ssh_public_keys ~}
       - ${key}
@@ -46,17 +36,36 @@ package_upgrade: true
 packages:
   - ca-certificates
   - curl
-  - gnupg
   - git
   - jq
   - htop
   - unattended-upgrades
+%{ if hashcat ~}
+  # hashcat, plus the OpenCL plumbing it will not start without. The default
+  # plan has no GPU -- vx1-g-32c-128g reports gpu_brand "none"; the "g" is
+  # "general purpose", not graphics -- so pocl is the runtime that actually
+  # executes the kernels, across the 32 AMD threads.
+  - hashcat
+  - pocl-opencl-icd
+  - ocl-icd-libopencl1
+  - clinfo
+  # A dictionary run against a large corpus outlives an SSH session.
+  - tmux
+  # Corpus handling: unpack, repack and move dictionaries around. "7zip", not
+  # "p7zip-full" -- on 26.04 the latter is a transitional package built from
+  # this source.
+  - 7zip
+  - pigz
+  - xz-utils
+  - zstd
+  - rsync
+%{ endif ~}
 %{ for pkg in extra_packages ~}
   - ${pkg}
 %{ endfor ~}
 
 write_files:
-  - path: /etc/containerlabs/metadata.json
+  - path: /etc/crackbox/metadata.json
     permissions: "0644"
     content: |
       {
@@ -64,146 +73,143 @@ write_files:
         "instance": "${instance_key}",
         "hostname": "${hostname}",
         "fqdn": "${fqdn}",
-        "docker": ${docker},
+        "hashcat": ${hashcat},
+        "data_mount": "${data_mount}",
         "managed_by": "opentofu"
       }
 
   # Key-only SSH, and no root at all: ${admin_user} (created above with the
   # account keys and passwordless sudo) is the way in.
-  - path: /etc/ssh/sshd_config.d/99-containerlabs.conf
+  - path: /etc/ssh/sshd_config.d/99-crackbox.conf
     permissions: "0644"
     content: |
       PasswordAuthentication no
       KbdInteractiveAuthentication no
       PermitRootLogin no
 
-%{ if docker ~}
-  - path: /etc/docker/daemon.json
-    permissions: "0644"
-    content: |
-      {
-        "log-driver": "json-file",
-        "log-opts": { "max-size": "10m", "max-file": "3" },
-        "live-restore": true
-      }
-
+%{ if hashcat ~}
   # Kept as a script rather than inline runcmd entries so the shell quoting
   # survives YAML unmangled.
-  - path: /opt/containerlabs/install-docker.sh
+  - path: /opt/crackbox/mount-data.sh
     permissions: "0755"
     content: |
       #!/usr/bin/env bash
       set -euo pipefail
 
-      install -m 0755 -d /etc/apt/keyrings
-      curl -fsSL https://download.docker.com/linux/ubuntu/gpg \
-        -o /etc/apt/keyrings/docker.asc
-      chmod a+r /etc/apt/keyrings/docker.asc
+      MOUNT='${data_mount}'
+      OWNER='${admin_user}'
 
-      . /etc/os-release
-      echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $${VERSION_CODENAME} stable" \
-        > /etc/apt/sources.list.d/docker.list
+      # The storage on a vx1-*-<n>s plan arrives as its own device rather than
+      # as extra room on the root disk, and an attached block volume does the
+      # same. Adopt the largest disk that is not the root disk and carries
+      # nothing at all -- no filesystem, no partition table, no mount anywhere
+      # in its tree. A device that already holds data belongs to somebody and
+      # is left alone, which is also what makes this safe to re-run.
+      root_src="$(findmnt -no SOURCE /)"
+      root_disk="$(lsblk -no PKNAME "$root_src" 2>/dev/null | head -n1)"
+      : "$${root_disk:=$(basename "$root_src")}"
 
-      apt-get update -qq
-      DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
-        docker-ce docker-ce-cli containerd.io \
-        docker-buildx-plugin docker-compose-plugin
+      target=""
+      target_size=0
+      while read -r name size; do
+        [ "$name" = "$root_disk" ] && continue
 
-      systemctl enable --now docker
+        # One line per node in the device's tree; any non-blank field means
+        # the disk is already carrying something.
+        if lsblk -nro FSTYPE,MOUNTPOINT "/dev/$name" | grep -q '[^[:space:]]'; then
+          continue
+        fi
 
-      # Vultr's "limited" user scheme creates linuxuser; harmless if absent.
-      if id linuxuser >/dev/null 2>&1; then
-        usermod -aG docker linuxuser
+        if [ "$size" -gt "$target_size" ]; then
+          target="/dev/$name"
+          target_size="$size"
+        fi
+      done < <(lsblk -dnb -o NAME,SIZE -e 1,7,11)
+
+      if [ -n "$target" ]; then
+        echo "crackbox: claiming $target ($((target_size / 1024 / 1024 / 1024)) GB) for $MOUNT"
+        mkfs.ext4 -q -L crackdata "$target"
+        uuid="$(blkid -s UUID -o value "$target")"
+        mkdir -p "$MOUNT"
+
+        # By UUID, because device names are not stable across a rebuild. nofail
+        # so a missing or replaced volume degrades to an unmounted directory
+        # rather than dropping the box into emergency mode at boot.
+        printf 'UUID=%s %s ext4 defaults,noatime,nofail 0 2\n' "$uuid" "$MOUNT" \
+          >>/etc/fstab
+        systemctl daemon-reload
+        mount "$MOUNT"
+      else
+        echo "crackbox: no spare disk; $MOUNT stays on the root filesystem"
       fi
 
-  - path: /opt/containerlabs/install-containerlab.sh
-    permissions: "0755"
-    content: |
-      #!/usr/bin/env bash
-      set -euo pipefail
-
-      # Containerlab's apt repository (Gemfury) publishes no signing key;
-      # trusted=yes is the documented install path.
-      echo "deb [trusted=yes] https://netdevops.fury.site/apt/ /" \
-        > /etc/apt/sources.list.d/netdevops.list
-
-      apt-get update -qq
-      DEBIAN_FRONTEND=noninteractive apt-get install -y -qq containerlab
-%{ if img != null ~}
+      # Owned by ${admin_user} so cracking runs, potfiles and session restores
+      # need no sudo.
+      install -d -m 0755 -o "$OWNER" -g "$OWNER" \
+        "$MOUNT" \
+        "$MOUNT/wordlists" \
+        "$MOUNT/hashes" \
+        "$MOUNT/rules" \
+        "$MOUNT/sessions"
+%{ if wordlists != null ~}
 
   # Root-only: this script embeds the object storage credentials.
-  - path: /opt/containerlabs/fetch-ceos.sh
+  - path: /opt/crackbox/fetch-wordlists.sh
     permissions: "0700"
     content: |
       #!/usr/bin/env bash
       set -euo pipefail
 
-      install -d -m 0755 -o ${admin_user} -g ${admin_user} '${img.directory}'
+      DEST='${wordlists.directory}'
+      OWNER='${admin_user}'
+
+      install -d -m 0755 -o "$OWNER" -g "$OWNER" "$DEST"
 
       # Signed S3 GET via curl's SigV4 support -- no aws-cli needed. The
       # signing region is the endpoint's first DNS label.
-      curl -fsSL --retry 3 --retry-delay 5 \
-        --user '${img.access_key}:${img.secret_key}' \
-        --aws-sigv4 "aws:amz:${img.region}:s3" \
-        -o '${img.directory}/${img.name}' \
-        'https://${img.host}/${img.bucket}/${img.name}'
+      #
+      # Files land under their basename and are stored exactly as downloaded:
+      # hashcat reads gzip-compressed wordlists natively, so unpacking a
+      # hundred-gigabyte dictionary would only cost disk.
+      fetch() {
+        local key="$1"
+        local out="$DEST/$(basename "$key")"
 
-      # cEOS tarballs are root filesystem archives, not `docker save` output,
-      # so they come in via `docker import`.
-      docker import '${img.directory}/${img.name}' ceos:latest
-%{ if img.version != "" ~}
+        echo "crackbox: fetching $key"
+        curl -fsSL --retry 5 --retry-delay 10 --retry-connrefused \
+          --user '${wordlists.access_key}:${wordlists.secret_key}' \
+          --aws-sigv4 "aws:amz:${wordlists.region}:s3" \
+          -o "$out" \
+          "https://${wordlists.host}/${wordlists.bucket}/$key"
 
-      # Course topologies pin the release tag (image: ceos:${img.version}).
-      # With only ceos:latest present, docker would go looking for that
-      # reference on Docker Hub, where no public ceos repository exists.
-      docker tag ceos:latest 'ceos:${img.version}'
-%{ endif ~}
+        chown "$OWNER:$OWNER" "$out"
+      }
 
-      # Only the imported image is kept; the tarball and the staging
-      # directory are build remains. -p sweeps empty parent directories too
-      # and never touches one that still has content.
-      rm -f '${img.directory}/${img.name}'
-      rmdir -p --ignore-fail-on-non-empty '${img.directory}'
-%{ endif ~}
-%{ if course_repo != "" ~}
-
-  - path: /opt/containerlabs/build-course-image.sh
-    permissions: "0755"
-    content: |
-      #!/usr/bin/env bash
-      set -euo pipefail
-
-      REPO_URL='${course_repo}'
-      DEST="/home/${admin_user}/$(basename "$REPO_URL" .git)"
-
-      # Cloned as ${admin_user} and kept after the build: the working tree in
-      # their home is part of the course setup, theirs to pull and edit.
-      if [ ! -d "$DEST/.git" ]; then
-        sudo -u ${admin_user} git clone "$REPO_URL" "$DEST"
-      fi
-
-      docker build -t netcourse-host:latest "$DEST/common/host-image/"
+%{ for key in wordlists.keys ~}
+      fetch '${key}'
+%{ endfor ~}
 %{ endif ~}
 %{ endif ~}
 
 runcmd:
-%{ if docker ~}
-  - [bash, /opt/containerlabs/install-docker.sh]
-  - [bash, /opt/containerlabs/install-containerlab.sh]
-%{ if img != null ~}
-  - [bash, /opt/containerlabs/fetch-ceos.sh]
-%{ endif ~}
-%{ if course_repo != "" ~}
-  - [bash, /opt/containerlabs/build-course-image.sh]
-%{ endif ~}
-  # Keep only the images: drop the build cache, dangling layers and the
-  # one-shot scripts (fetch-ceos.sh embeds the object storage credentials).
-  - [docker, builder, prune, -af]
-  - [docker, image, prune, -f]
-  - [bash, -c, "rm -f /opt/containerlabs/*.sh"]
-%{ endif ~}
+  # First, before anything slow. The hardened sshd config written above is
+  # inert until sshd reloads, and the wordlist download further down can run
+  # for hours -- applying it here closes that window instead of leaving
+  # password authentication live for the length of a corpus transfer.
   - [systemctl, restart, ssh]
-  - [touch, /etc/containerlabs/ready]
+%{ if hashcat ~}
+  - [bash, /opt/crackbox/mount-data.sh]
+%{ if wordlists != null ~}
+  - [bash, /opt/crackbox/fetch-wordlists.sh]
+  # It has done its job and it holds the object storage credentials.
+  - [rm, -f, /opt/crackbox/fetch-wordlists.sh]
+%{ endif ~}
+  # Proof that the OpenCL runtime came up and hashcat can see the threads.
+  # Recorded rather than asserted: a box whose backend failed should still
+  # finish booting so you can log in and read this file.
+  - [bash, -c, "hashcat -I >/etc/crackbox/backends.txt 2>&1 || true"]
+%{ endif ~}
+  - [touch, /etc/crackbox/ready]
 
 power_state:
   mode: reboot

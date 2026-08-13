@@ -1,7 +1,13 @@
-# containerlabs
+# crackbox
 
-OpenTofu-managed Vultr compute instances for container labs, driven entirely
-from manually-triggered GitHub Actions workflows.
+OpenTofu-managed Vultr compute instances for running **hashcat against large
+dictionaries** in a home lab, driven entirely from manually-triggered GitHub
+Actions workflows.
+
+A box comes up with hashcat and a working OpenCL runtime, its bulk storage
+formatted and mounted at `/data`, and — optionally — a dictionary corpus
+already pulled down from Vultr Object Storage. Rent it by the hour, crack,
+snapshot, destroy.
 
 Five operations, five workflows, all `workflow_dispatch`:
 
@@ -18,8 +24,23 @@ file is the source of truth: change it in a PR, read the plan the bot posts,
 merge, then run **2 · Apply**.
 
 **Setting this up for the first time? → [Deployment guide](#deployment-guide).**
-It starts from an empty account and reaches a running lab in nine steps, with a
+It starts from an empty account and reaches a running box in nine steps, with a
 free checkpoint before anything is billed.
+
+> **This box is expensive to leave running.** The default plan is $1.223/hr —
+> about $893 a month if you forget it. The intended shape is: apply, crack,
+> snapshot if the potfile matters, destroy. **3 · Destroy** is what stops the
+> billing; powering the instance off does not.
+
+> **Coming from the `containerlabs` revision of this stack?** The backend state
+> key moved from `containerlabs/terraform.tfstate` to
+> `crackbox/terraform.tfstate` ([backend.tf](backend.tf)). That is deliberate,
+> and it is the non-destructive choice: applying this config starts from an
+> empty state and builds crackboxes, rather than reading the old state and
+> proposing to destroy your labs. The flip side is that **any instance from the
+> old stack keeps running and keeps billing, now unmanaged.** Destroy it from
+> the previous revision first, or clean it up in the portal. **5 · Diagnose**
+> will list it under "Unmanaged instances".
 
 ---
 
@@ -36,7 +57,7 @@ free checkpoint before anything is billed.
 ├── outputs.tf               IPs, SSH commands, DNS records, inventory
 ├── instances.auto.tfvars    ← the fleet lives here
 ├── templates/
-│   └── cloud-init.yaml.tftpl    first-boot config (Docker, SSH hardening)
+│   └── cloud-init.yaml.tftpl    first-boot config (hashcat, /data, SSH hardening)
 ├── scripts/
 │   ├── lib.sh                   shared Vultr API helpers
 │   ├── bootstrap-backend.sh     one-time state bucket setup
@@ -51,7 +72,7 @@ free checkpoint before anything is billed.
 
 ## Deployment guide
 
-From nothing to a running lab. Around 20 minutes, most of it clicking through
+From nothing to a running box. Around 20 minutes, most of it clicking through
 the Vultr and GitHub web UIs.
 
 **Out of the box this builds nothing** — `instances` in
@@ -66,10 +87,11 @@ storage and a few cents of compute:
 | Steps 0–5 and 9 (setup, plan, diagnose) | free |
 | Object Storage subscription (step 3) | ~$5/mo |
 | `vc2-1c-2gb` smoke-test instance (step 6–8) | ~$0.015/hr |
-| `vhp-4c-12gb-amd` real lab (step 9) | $0.099/hr, $72/mo cap |
+| `vx1-g-32c-128g-1920s` real crackbox (step 9) | **$1.223/hr, $892.79/mo** |
 
 Vultr bills compute hourly, so the full create → snapshot → destroy rehearsal
-costs about ten cents.
+costs about ten cents — the rehearsal deliberately runs on the cheap plan, and
+you only reach the real one in step 9.
 
 ---
 
@@ -130,8 +152,8 @@ behind — that is just the provider cache.
 The workflows only exist once the repo is on GitHub.
 
 ```bash
-git init && git add . && git commit -m "containerlabs: initial"
-gh repo create <you>/containerlabs --private --source=. --push
+git init && git add . && git commit -m "crackbox: initial"
+gh repo create <you>/crackbox --private --source=. --push
 ```
 
 Commit `.terraform.lock.hcl`. Do **not** commit `backend.hcl` — it is
@@ -203,8 +225,8 @@ Secrets:
 | `TFSTATE_ACCESS_KEY` | Vultr Object Storage S3 access key |
 | `TFSTATE_SECRET_KEY` | Vultr Object Storage S3 secret key |
 | `CLOUDFLARE_API_TOKEN` | Optional. Enables automatic A/AAAA record sync; needs **Zone:Read + DNS:Edit** on the zone. |
-| `IMG_ACCESS_KEY` | Optional*. Vultr Object Storage access key for the cEOS image bucket. |
-| `IMG_SECRET_KEY` | Optional*. Vultr Object Storage secret key for the cEOS image bucket. |
+| `WORDLIST_ACCESS_KEY` | Optional*. Vultr Object Storage access key for the dictionary bucket. |
+| `WORDLIST_SECRET_KEY` | Optional*. Vultr Object Storage secret key for the dictionary bucket. |
 
 The state keys come from `scripts/bootstrap-backend.sh --print-secrets`. The
 Cloudflare token is created at **My Profile → API Tokens** with the *Edit zone
@@ -216,26 +238,40 @@ Variables:
 
 | Name | Example | Notes |
 |---|---|---|
-| `TFSTATE_BUCKET` | `containerlabs-tfstate` | |
+| `TFSTATE_BUCKET` | `crackbox-tfstate` | |
 | `TFSTATE_REGION` | `us-east-1` | Signing region only. Vultr ignores it; it does **not** need to match your cluster. |
 | `TFSTATE_ENDPOINT` | `https://ewr1.vultrobjects.com` | Must match `endpoints.s3` in your generated `backend.hcl`. |
-| `PROJECT` | `containerlabs` | Optional. Must match `project` in tfvars. |
+| `PROJECT` | `crackbox` | Optional. Must match `project` in tfvars. |
 | `TOFU_VERSION` | `1.12.5` | Optional. Defaults to 1.12.5. |
-| `IMG_DIRECTORY` | `/opt/images` | Optional*. Directory cloud-init creates on docker-enabled instances, owned by the admin user. |
-| `IMG_ENDPOINT` | `https://ewr1.vultrobjects.com` | Optional*. Object storage endpoint hosting the cEOS image. |
-| `IMG_BUCKET` | `lab-images` | Optional*. Bucket holding the cEOS image. |
-| `IMG_NAME` | `cEOS64-lab-4.32.2F.tar.xz` | Optional*. Object key; also the filename under `IMG_DIRECTORY`. |
+| `WORDLIST_DIRECTORY` | `/data/wordlists` | Optional*. Where the dictionaries land. Keep it under `/data` so they go on the bulk disk, not the root filesystem. |
+| `WORDLIST_ENDPOINT` | `https://ewr1.vultrobjects.com` | Optional*. Object storage endpoint hosting the corpus. |
+| `WORDLIST_BUCKET` | `wordlists` | Optional*. Bucket holding the corpus. |
+| `WORDLIST_NAMES` | `rockyou.txt.gz, corpora/weakpass_4.txt.gz, rules/best64.rule` | Optional*. Object keys, comma- or whitespace-separated. |
 
-\* The six `IMG_*` settings are all-or-nothing. Set every one and each
-docker-enabled instance downloads the cEOS image into `IMG_DIRECTORY` on first
-boot and imports it into Docker as `ceos:latest`, plus a `ceos:<version>` tag
-parsed from `IMG_NAME` (`cEOS64-lab-4.32.2F.tar.xz` -> `ceos:4.32.2F`) so
-course topologies that pin the release resolve locally instead of reaching for
-Docker Hub. The tarball and the staging directory are removed after import --
-only the Docker image is kept. Set none of the six and the download is
-skipped; a partial set fails the plan. The credentials are baked into the
-instance's cloud-init user data, so treat user data (and saved plans) as
-sensitive once these are configured.
+\* The six `WORDLIST_*` settings are all-or-nothing. Set every one and each
+hashcat instance downloads those objects into `WORDLIST_DIRECTORY` on first
+boot, via signed S3 `GET`s (curl's `--aws-sigv4`, no aws-cli involved). Set
+none of the six and the download is skipped — the box still comes up with an
+empty `/data/wordlists` for you to `rsync` into. A partial set fails the plan,
+and so does configuring a corpus for a fleet in which *no* instance has
+hashcat enabled — it would download nowhere. A `hashcat = false` box sitting
+alongside cracking boxes is fine; the corpus simply is not for it.
+
+Each key keeps only its basename on disk, so `corpora/weakpass_4.txt.gz` lands
+as `/data/wordlists/weakpass_4.txt.gz`. Files are stored **exactly as
+downloaded and are never unpacked**: hashcat reads gzip-compressed wordlists
+natively, so decompressing a hundred-gigabyte dictionary would cost disk and
+buy nothing.
+
+The credentials are baked into the instance's cloud-init user data, so treat
+user data (and saved plans) as sensitive once these are configured. On the
+instance the fetch script is mode `0700` and is deleted as soon as it has run.
+
+> A large corpus makes first boot **long** — cloud-init runs the download
+> synchronously, and hundreds of gigabytes over a shared 15 Gbps link takes
+> what it takes. SSH is available throughout (the hardened sshd config is
+> applied *before* the download starts, deliberately); `/etc/crackbox/ready`
+> appears only when everything has finished.
 
 Or from the CLI:
 
@@ -244,25 +280,39 @@ gh secret set VULTR_API_KEY
 gh secret set TFSTATE_ACCESS_KEY
 gh secret set TFSTATE_SECRET_KEY
 gh secret set CLOUDFLARE_API_TOKEN   # optional: automatic A/AAAA record sync
-gh variable set TFSTATE_BUCKET   --body containerlabs-tfstate
+gh variable set TFSTATE_BUCKET   --body crackbox-tfstate
 gh variable set TFSTATE_REGION   --body us-east-1
 gh variable set TFSTATE_ENDPOINT --body https://ewr1.vultrobjects.com
 
-# Optional, all-or-nothing: cEOS image download on docker-enabled instances.
-gh secret set IMG_ACCESS_KEY
-gh secret set IMG_SECRET_KEY
-gh variable set IMG_DIRECTORY --body /opt/images
-gh variable set IMG_ENDPOINT  --body https://ewr1.vultrobjects.com
-gh variable set IMG_BUCKET    --body lab-images
-gh variable set IMG_NAME      --body cEOS64-lab-4.32.2F.tar.xz
+# Optional, all-or-nothing: dictionary corpus download on hashcat instances.
+gh secret set WORDLIST_ACCESS_KEY
+gh secret set WORDLIST_SECRET_KEY
+gh variable set WORDLIST_DIRECTORY --body /data/wordlists
+gh variable set WORDLIST_ENDPOINT  --body https://ewr1.vultrobjects.com
+gh variable set WORDLIST_BUCKET    --body wordlists
+gh variable set WORDLIST_NAMES     --body 'rockyou.txt.gz, corpora/weakpass_4.txt.gz'
 ```
+
+Locally the same six are `TF_VAR_wordlist_*`:
+
+```bash
+export TF_VAR_wordlist_directory=/data/wordlists
+export TF_VAR_wordlist_endpoint=https://ewr1.vultrobjects.com
+export TF_VAR_wordlist_bucket=wordlists
+export TF_VAR_wordlist_names='rockyou.txt.gz, corpora/weakpass_4.txt.gz'
+export TF_VAR_wordlist_access_key=…
+export TF_VAR_wordlist_secret_key=…
+```
+
+They are deliberately *not* in [instances.auto.tfvars](instances.auto.tfvars):
+two of the six are credentials, and that file is committed.
 
 ### Step 5 — Environments (the approval gate)
 
 **Settings → Environments**, create two:
 
-- `containerlabs` — used by **2 · Apply**
-- `containerlabs-destroy` — used by **3 · Destroy**
+- `crackbox` — used by **2 · Apply**
+- `crackbox-destroy` — used by **3 · Destroy**
 
 Add **required reviewers** to each. This is what turns these workflows into
 reviewed operations. Because plan and apply are separate jobs, the approver
@@ -283,7 +333,7 @@ job runs `tofu init` + `tofu plan` against your new bucket — proving the Objec
 Storage backend handshake.
 
 **Expected:** green run. The summary shows your account balance, "No instances
-are currently tagged for project `containerlabs`", and "No drift."
+are currently tagged for project `crackbox`", and "No drift."
 
 If this fails, fix it here — it is free. See [Troubleshooting](#troubleshooting).
 
@@ -296,12 +346,19 @@ mechanics are proven. In [instances.auto.tfvars](instances.auto.tfvars):
 ssh_key_names = ["your-key-name"]     # required — see below
 
 instances = {
-  lab01 = {
-    plan   = "vc2-1c-2gb"             # ~$0.015/hr instead of $0.099/hr
-    region = "lax"
+  crack01 = {
+    plan   = "vc2-1c-2gb"             # ~$0.015/hr instead of $1.223/hr
+    region = "sea"
+    hashcat = false                   # skip the toolchain on a 1 GB test box
   }
 }
 ```
+
+`hashcat = false` here on purpose: this step is proving the *deployment
+machinery*, and installing hashcat plus an OpenCL runtime on a 1 vCPU box
+proves nothing you need yet. Leave the `WORDLIST_*` settings unset for the
+rehearsal too — a corpus configured for a fleet where nothing has hashcat
+enabled fails the plan by design, since it would download nowhere.
 
 `ssh_key_names` is not optional. cloud-init sets `PasswordAuthentication no` on
 first boot, so an instance with no key is reachable only through the Vultr web
@@ -318,34 +375,46 @@ Run all four remaining workflows in order. Together they cost a few cents.
    summary prints the IP and an SSH command.
 2. Wait ~3 minutes for cloud-init, then check it landed:
    ```bash
-   ssh root@<ip> 'cat /etc/containerlabs/metadata.json; ls /etc/containerlabs/ready; docker version'
+   ssh ahopkins@<ip> 'cat /etc/crackbox/metadata.json; ls /etc/crackbox/ready'
    ```
    The `ready` marker is written last, so its presence means cloud-init finished.
-3. **4 · Snapshot** — `action: create`, `instance: lab01`, `wait: true`. Then
+3. **4 · Snapshot** — `action: create`, `instance: crack01`, `wait: true`. Then
    `action: list` to see it.
 4. **5 · Diagnose** — now with a real instance. Expect port 22 open and the
    fleet table populated.
-5. **3 · Destroy** — `instance: lab01`, `confirm: destroy lab01`,
+5. **3 · Destroy** — `instance: crack01`, `confirm: destroy crack01`,
    `snapshot_first: true`. Stops the billing.
 
 If all five pass, the system works.
 
 ### Step 9 — Switch to the real baseline
 
-Drop the `plan`/`region` overrides so `lab01` inherits `var.defaults`
-(`vhp-4c-12gb-amd` in `lax`), or set them to whatever you actually want:
+Drop the overrides so `crack01` inherits `var.defaults`
+(`vx1-g-32c-128g-1920s` in `sea`), or set them to whatever you actually want:
 
 ```hcl
 instances = {
-  lab01 = {}
+  crack01 = {}
 }
 ```
 
-PR → read the plan → merge → **2 · Apply**.
+PR → read the plan → merge → **2 · Apply**. This is the point at which the
+meter starts at $1.223/hr, and where a configured `WORDLIST_*` corpus starts
+downloading.
 
-Note that this **replaces** the instance rather than resizing it if the disk
-shrinks; the plan tells you which. With the `CLOUDFLARE_API_TOKEN` secret set,
-the apply workflow creates or updates the `lab01.dhs-labs.us` A and AAAA
+Once cloud-init finishes, confirm the two things that matter:
+
+```bash
+ssh ahopkins@<ip> 'cat /etc/crackbox/backends.txt; df -h /data; ls -la /data/wordlists'
+```
+
+`backends.txt` is `hashcat -I` captured on first boot — it should list a pocl
+device with 32 compute units. `df -h /data` should show the 1920 GB filesystem,
+not the root disk.
+
+Note that switching plans **replaces** the instance rather than resizing it if
+the disk shrinks; the plan tells you which. With the `CLOUDFLARE_API_TOKEN` secret set,
+the apply workflow creates or updates the `crack01.dhs-labs.us` A and AAAA
 records automatically (`scripts/dns-sync.sh`), and the destroy workflow
 removes them; without it, the `dns_records` output lists what the fleet
 expects so you can reconcile by hand.
@@ -354,38 +423,91 @@ expects so you can reconcile by hand.
 
 ## Defining the fleet
 
-Every instance inherits a single baseline, modelled on the existing
-`containerlabs.dhs-labs.us` box:
+Every instance inherits a single baseline:
 
 | `defaults` field | Value | |
 |---|---|---|
-| `plan` | `vhp-4c-12gb-amd` | 4 vCPU, 12 GB, 260 GB AMD NVMe, 7 TB transfer, $72/mo |
-| `region` | `lax` | Los Angeles |
+| `plan` | `vx1-g-32c-128g-1920s` | 32 vCPU, 128 GB, 1920 GB, AMD, 9 TB transfer, $892.79/mo |
+| `region` | `sea` | Seattle |
 | `os_name` | `Ubuntu 26.04 LTS x64` | os_id 2760 |
 | `user_scheme` | `root` | |
-| `docker` | `true` | Docker CE + compose, log rotation |
+| `hashcat` | `true` | hashcat + pocl OpenCL, `/data` mounted, corpus fetched |
 | `enable_ipv6` | `true` | |
 | `backups` | `false` | Vultr automatic backups, billed separately |
 
-So a whole lab is one line, and you override only what differs:
+### About that plan
+
+Two things about `vx1-g-32c-128g-1920s` are worth knowing before you change it.
+
+**It has no GPU.** The `-g-` is *general purpose* — the other half of the `vx1`
+family is `-m-`, memory-optimized — and the plans API reports `gpu_brand:
+"none"`. Cracking runs on 32 AMD threads through **pocl**, the portable CPU
+OpenCL runtime, which is what the `pocl-opencl-icd` package in the cloud-init
+payload is for. That is an order of magnitude off a mid-range GPU on fast
+hashes (MD5, NTLM, SHA-1) and much closer on the deliberately slow ones
+(bcrypt, scrypt, argon2), where GPUs lose most of their advantage anyway.
+
+If the trade stops making sense, the `vcg-*` plans carry NVIDIA cards —
+`vcg-a40-6c-30g-12vram` is an A40 with 12 GB VRAM and 550 GB of disk at
+$315/mo, less than half the price of this one. Switching is not just a plan
+string: the cloud-init payload would need an NVIDIA driver + CUDA install
+added, since hashcat needs the vendor runtime to see the card.
+
+**The `-1920s` suffix is what buys the disk.** The bare `vx1-g-32c-128g` is
+$700.80/mo but ships a **1 GB** boot disk and expects block storage to be
+attached separately — nowhere to put a dictionary corpus. The suffixed variant
+is $892.79/mo with 1920 GB.
+
+Region is `sea` because this plan is not offered in `lax`. It is available in
+`ewr`, `ord`, `sea`, `atl`, `ams` and `nrt`.
+
+### Storage layout
+
+`hashcat = true` instances get their bulk storage found, formatted and mounted
+on first boot. The storage on a `vx1-*-<n>s` plan arrives as its own device
+rather than as extra room on the root disk, so `mount-data.sh` picks the
+largest disk that is not the root disk and carries *nothing at all* — no
+filesystem, no partition table, no mount anywhere in its tree — formats it
+ext4 and adds it to `/etc/fstab` by UUID with `nofail`. A device that already
+holds data is left alone, which is what makes the script safe to re-run and
+safe when you attach your own block volume.
+
+If there is no such device the mount is skipped and the directories are simply
+created on the root filesystem, so the payload also works on plans that put
+everything on one disk.
+
+```
+/data                 the mount point (var.data_mount)
+├── wordlists/        WORDLIST_* downloads land here
+├── hashes/           target hashes
+├── rules/            rule files
+└── sessions/         --session restore points
+```
+
+All four are owned by `var.admin_user`, so runs, potfiles and session restores
+need no sudo.
+
+### Declaring instances
+
+A whole box is one line, and you override only what differs:
 
 ```hcl
-project  = "containerlabs"
+project  = "crackbox"
 dns_zone = "dhs-labs.us"
 
 ssh_key_names = ["ahopkins-yubikey"]
 
 instances = {
-  lab01 = {}                                    # the full baseline
+  crack01 = {}                                    # the full baseline
 
-  lab02 = {                                     # bigger, with extras
-    plan           = "vhp-8c-24gb-amd"
-    extra_packages = ["tmux", "build-essential"]
+  crack02 = {                                     # bigger, with extras
+    plan           = "vx1-g-64c-256g-3840s"
+    extra_packages = ["hashcat-data", "john"]
   }
 
-  lab03 = {                                     # different region and image
-    region  = "ewr"
-    os_name = "Ubuntu 24.04 LTS x64"
+  jumpbox = {                                     # no cracking toolchain at all
+    plan    = "vc2-1c-2gb"
+    hashcat = false
     backups = true
     backup_schedule = { type = "daily", hour = 4 }
   }
@@ -397,7 +519,7 @@ default re-plans every instance that has not overridden it. `plan` and `region`
 changes are resizes/moves where Vultr allows them; changing `os_name` rebuilds.
 
 **Naming.** With `dns_zone` set, hostname and label default to
-`<key>.<dns_zone>` — `lab01.dhs-labs.us`. Set `dns_zone = ""` to get
+`<key>.<dns_zone>` — `crack01.dhs-labs.us`. Set `dns_zone = ""` to get
 `<project>-<key>` instead. The HCL itself creates no DNS records;
 `scripts/dns-sync.sh` reconciles the `dns_records` output (A and AAAA)
 against Cloudflare — automatically after each workflow apply and destroy
@@ -407,20 +529,20 @@ against Cloudflare — automatically after each workflow apply and destroy
 records carrying that comment, so hand-made records in the zone are never
 touched.
 
-The map key (`lab01`) is the handle every workflow's `instance` input takes.
+The map key (`crack01`) is the handle every workflow's `instance` input takes.
 **Renaming a key destroys and recreates the machine** — to rename without
 rebuilding, set `label` and `hostname` instead.
 
 Discover valid values:
 
 ```bash
-make regions              # lax, ewr, ams, ...
-make plans                # plans available in lax, with prices
+make regions              # sea, ewr, ams, ...
+make plans                # plans available in sea, with prices
 make plans REGION=ewr     # ... or elsewhere
 make os                   # exact os_name strings
 ```
 
-**Tags are load-bearing.** Every instance is stamped with `containerlabs`,
+**Tags are load-bearing.** Every instance is stamped with `crackbox`,
 `managed-by:opentofu`, and `instance:<key>`. The first two are the ownership
 marker — the snapshot and diagnose scripts ignore anything without them, so
 instances you create by hand in the portal are never touched. The third is how
@@ -432,6 +554,69 @@ Full option list with defaults and validation rules:
 
 > Editing `templates/cloud-init.yaml.tftpl` only affects **new** instances.
 > cloud-init runs once, on first boot.
+
+---
+
+## Running hashcat
+
+What the payload installs: `hashcat`, `pocl-opencl-icd` and
+`ocl-icd-libopencl1` (the OpenCL runtime and loader — hashcat will not start
+without one), `clinfo`, `tmux`, and the corpus-handling tools `7zip`,
+`pigz`, `xz-utils`, `zstd` and `rsync`.
+
+First, confirm the backend came up. Cloud-init captures `hashcat -I` on first
+boot, precisely so a box whose OpenCL runtime failed still finishes booting and
+leaves you something to read:
+
+```bash
+cat /etc/crackbox/backends.txt
+clinfo -l
+```
+
+You want a pocl device reporting 32 compute units. If hashcat declines to use
+it — pocl is not a vendor runtime, and hashcat is conservative about those —
+`--force` is the documented escape hatch, and `-D 1` restricts it to CPU
+devices explicitly.
+
+Then, **inside tmux**, because these runs outlive the SSH session:
+
+```bash
+tmux new -s crack
+
+# Straight dictionary run. hashcat reads the .gz without unpacking it.
+hashcat -m 1000 -a 0 -w 3 \
+  --session ntlm --potfile-path /data/sessions/ntlm.pot \
+  /data/hashes/ntlm.txt /data/wordlists/rockyou.txt.gz
+
+# Dictionary + rules — where a large corpus actually earns the 32 threads.
+hashcat -m 1000 -a 0 -w 3 \
+  --session ntlm-r --potfile-path /data/sessions/ntlm-r.pot \
+  -r /data/rules/best64.rule \
+  /data/hashes/ntlm.txt /data/wordlists/weakpass_4.txt.gz
+```
+
+`-w 3` is the "high" workload profile; `-w 4` ("nightmare") is fine here since
+nothing else uses the box. Detach with `Ctrl-b d`, reattach with
+`tmux attach -t crack`.
+
+Resume an interrupted run with `--session <name> --restore`. Keep sessions and
+potfiles under `/data` as above — the root filesystem is small and, more to the
+point, `/data` is the thing worth snapshotting.
+
+**Cracked passwords live in the potfile.** Before you destroy the instance,
+either copy it off:
+
+```bash
+rsync -avz ahopkins@<ip>:/data/sessions/ ./sessions/
+```
+
+…or run **3 · Destroy** with `snapshot_first: true` and restore from the
+snapshot later (see [Snapshots and restore](#snapshots-and-restore)).
+
+> Snapshots capture the boot disk. Whether a Vultr snapshot of a `vx1-*-<n>s`
+> instance also captures the separately-mounted 1920 GB volume is **not
+> verified here** — see [Verified, and not](#verified-and-not). Copy the
+> potfile off explicitly if it matters.
 
 ---
 
@@ -459,11 +644,11 @@ Inputs: `instance` (required), `confirm` (required), `snapshot_first`
 You must type the confirmation phrase exactly:
 
 ```
-instance: lab01          confirm: destroy lab01
+instance: crack01          confirm: destroy crack01
 instance: all            confirm: destroy all
 ```
 
-Then the `containerlabs-destroy` environment gate, then a pre-destroy snapshot
+Then the `crackbox-destroy` environment gate, then a pre-destroy snapshot
 that the workflow waits for — a snapshot still uploading when the disk is
 deleted is not a backup.
 
@@ -509,7 +694,7 @@ Restores, on the other hand, *are* declarative:
 2. Set it on an instance:
 
    ```hcl
-   lab01 = {
+   crack01 = {
      plan        = "vc2-2c-4gb"
      region      = "ewr"
      snapshot_id = "b1e2…"
@@ -544,8 +729,22 @@ Object Storage keys for anything that reads state.
 ## Design notes
 
 **Why the map-of-instances shape.** One workspace, one state file, `for_each`
-over a map. Adding a lab is a two-line tfvars diff reviewable in a PR, and the
+over a map. Adding a box is a two-line tfvars diff reviewable in a PR, and the
 map key doubles as the `-target` address for single-instance operations.
+
+**Why the wordlist corpus is not an OpenTofu resource.** It is bytes on a disk,
+not desired state. Modelling it as one would put object keys — and their
+sizes — in state, and re-uploading a dictionary would be a config edit. So the
+corpus is fetched by cloud-init on first boot from object storage that this
+stack does not manage, exactly as the machine image is.
+
+**Why `/data` is discovered rather than declared.** The template does not name
+`/dev/vdb`. Device names are not stable across a rebuild, the `vx1` plans and
+an attached `vultr_block_storage` volume present their storage differently, and
+a plan whose storage is all on the root disk presents none at all. Probing for
+"the largest disk carrying nothing" handles all three, and refusing to touch a
+disk that already has a filesystem is what makes it safe to re-run and safe
+around volumes you attached yourself.
 
 **Targeting.** Passing an `instance` other than `all` adds
 `-target=vultr_instance.this["key"]`. OpenTofu prints a warning about this and
@@ -556,7 +755,7 @@ for surgery, use `all` for routine work.
 uses `use_lockfile` (a lock object in the same bucket, via S3 conditional
 writes). Not every S3-compatible provider implements those, so the workflows
 *also* share a GitHub Actions `concurrency` group —
-`containerlabs-tofu-state` — which serialises Plan, Apply, Destroy and the
+`crackbox-tofu-state` — which serialises Plan, Apply, Destroy and the
 drift check regardless. Snapshot runs in its own group since it never opens
 state.
 
@@ -579,7 +778,7 @@ land in state (unavoidable) and are exposed only through the `sensitive`
 **`tofu init` fails acquiring a state lock, or complains about conditional
 writes.** Your Object Storage cluster does not implement S3 conditional writes.
 Remove `use_lockfile = true` from [backend.tf](backend.tf); the
-`containerlabs-tofu-state` concurrency group still serialises every run.
+`crackbox-tofu-state` concurrency group still serialises every run.
 
 **`init` fails with a signature, checksum, or 400 error.** Check
 `TFSTATE_ENDPOINT` exactly matches `endpoints.s3` in your generated
@@ -602,9 +801,28 @@ Compare against `make os` and the portal's **Account → SSH Keys**.
 — e.g. to `managed-by-opentofu` and `instance-<key>`.
 
 **Apply succeeded but SSH is refused.** cloud-init is almost certainly still
-installing Docker. `/etc/containerlabs/ready` is written last. Check progress
-from the Vultr web console with `cloud-init status --wait`, or read
+running its package upgrade, or the box is rebooting after one.
+`/etc/crackbox/ready` is written last. Check progress from the Vultr web
+console with `cloud-init status --wait`, or read
 `/var/log/cloud-init-output.log`.
+
+**`/etc/crackbox/ready` never appears and the box seems idle.** A configured
+`WORDLIST_*` corpus downloads synchronously during cloud-init; a few hundred
+gigabytes takes a while. `ls -la /data/wordlists` and watch the file grow, or
+tail `/var/log/cloud-init-output.log` for the `crackbox: fetching` lines.
+
+**`df -h /data` shows the root filesystem, not the big disk.** `mount-data.sh`
+only claims a disk that is completely empty — no filesystem, no partition
+table, no mount. Run `lsblk -o NAME,SIZE,FSTYPE,MOUNTPOINT` to see what it
+saw. A device that already carries a filesystem is deliberately left alone;
+mount it yourself, or wipe it and re-run
+`sudo bash /opt/crackbox/mount-data.sh` (kept on the box for exactly this).
+
+**hashcat exits with "No devices found/left".** The OpenCL runtime did not come
+up. `clinfo -l` should list a pocl platform; if it lists nothing, check that
+`pocl-opencl-icd` actually installed (`dpkg -l pocl-opencl-icd`) — a failed
+`package_upgrade` earlier in cloud-init can take the package install down with
+it. `/etc/crackbox/backends.txt` holds what `hashcat -I` said on first boot.
 
 **Diagnose reports port 22 closed but you can SSH fine.** The probe runs from a
 GitHub runner. If you attached a `firewall_group_id` that only allows your own
@@ -622,33 +840,56 @@ machine exists in Vultr regardless, it was created outside this stack —
 ## Verified, and not
 
 Built and checked against OpenTofu 1.12.5 and vultr/vultr 2.32.0 (resolved from
-the `~> 2.26` constraint):
+the `~> 2.32` constraint):
 
 - `tofu fmt -check` and `tofu validate` pass.
-- `plan = vhp-4c-12gb-amd` exists, is available in `lax`, and is 4 vCPU /
-  12288 MB / 260 GB AMD NVMe at $72/mo. `Ubuntu 26.04 LTS x64` exists as
-  os_id 2760. Both checked against the live public Vultr catalogue.
-- The `defaults` inheritance was executed: a bare `lab01 = {}` resolves to the
-  full baseline, per-instance overrides win (including a deliberate `false`
-  beating a `true` default), snapshot-restored instances are excluded from OS
-  lookups, and OS/SSH-key lookups deduplicate.
-- All three `lifecycle` preconditions were shown to fire on the inputs that
-  should trip them, and not on valid ones.
-- The cloud-init template was rendered and parsed as YAML across the
-  Docker-on/off and `extra_cloud_init` combinations.
-- Ubuntu 26.04 is *Resolute Raccoon*, and Docker's apt repo publishes a
-  populated `resolute` suite — `docker-ce`, `docker-ce-cli`, `containerd.io`,
-  `docker-buildx-plugin` and `docker-compose-plugin` are all present
-  (`docker-ce 5:29.3.1-1~ubuntu.26.04~resolute`), and the signing key returns
-  200. So the repo line the template writes resolves on this image.
-- `snapshot.sh` and `diagnose.sh` were exercised end-to-end against a mock
-  Vultr API covering cursor pagination, instance resolution by key / DNS label
-  / UUID, prune ranking and age filtering, the tfvars-pinning guard, and the
-  `--yes` guards.
+- `plan = vx1-g-32c-128g-1920s` exists and is 32 vCPU / 131072 MB / 1920 GB /
+  AMD at $892.79/mo ($1.223/hr), available in `ewr`, `ord`, `sea`, `atl`, `ams`
+  and `nrt` — **not** in `lax`, which is why the default region moved. The bare
+  `vx1-g-32c-128g` is $700.80/mo with a **1 GB** disk and
+  `storage_type: block_storage`. Both report `gpu_brand: "none"`.
+  `Ubuntu 26.04 LTS x64` exists as os_id 2760. All checked against the live
+  public Vultr catalogue.
+- The cloud-init template was rendered and parsed as YAML across four
+  combinations: hashcat with a corpus, hashcat without one, `hashcat = false`,
+  and `extra_packages` + `extra_cloud_init`.
+- The two shell scripts the template embeds were extracted from the rendered
+  YAML and pass `bash -n`. The `$${…}` template escaping survives
+  intact — `mount-data.sh` renders `${root_disk:=$(basename "$root_src")}`, and
+  the per-key `fetch '…'` calls render one line per object.
+- Every package the payload installs is published in Ubuntu 26.04 *resolute*:
+  `hashcat 7.1.2+ds1-3` and `clinfo` (universe), `pocl-opencl-icd` (source
+  `pocl 6.0-7build1`), `ocl-icd-libopencl1`, `zstd`, `xz-utils`, `tmux` and
+  `rsync` (main), `pigz` (universe), and `7zip 26.00+dfsg-1`. Checked via the
+  Launchpad API and `packages.ubuntu.com`. The template asks for `7zip` rather
+  than `p7zip-full` because on 26.04 the latter is only a transitional package.
+
+Carried over from the previous revision of this stack and not re-executed
+against the current config:
+
+- The `defaults` inheritance behaviour (bare `crack01 = {}` resolving to the
+  full baseline, a deliberate `false` beating a `true` default, snapshot-restored
+  instances excluded from OS lookups, deduplicated lookups).
+- `snapshot.sh` and `diagnose.sh` against a mock Vultr API.
 
 Not verified, because it needs a live account with billing:
 
 - An actual `tofu apply` creating a real instance.
+- **How the 1920 GB actually presents itself.** The plans API says
+  `storage_type: local_and_block_storage`, but whether that arrives as a second
+  block device or as a larger root disk is not documented and was not observed.
+  `mount-data.sh` is written to handle either — it mounts a spare disk if it
+  finds one and falls back to creating the directories on the root filesystem if
+  it does not — but which branch runs on this plan is unconfirmed. Check
+  `df -h /data` on the first real box.
+- Whether a Vultr snapshot of such an instance captures the second volume.
+  Copy potfiles off explicitly rather than relying on it.
+- That hashcat accepts the pocl device without `--force`. hashcat is
+  deliberately conservative about non-vendor OpenCL runtimes; `/etc/crackbox/
+  backends.txt` records what it actually said on first boot.
+- Real cracking throughput. No benchmark was run — the 32-thread-vs-GPU
+  comparison in this README is a general statement about CPU versus GPU
+  cracking, not a measurement of this plan.
 - That Vultr accepts a colon in tag values. It is undocumented, but govultr's
   own examples use tags containing spaces, so tags look permissive. If it is
   rejected, the first apply fails loudly and the fix is to change the three tag

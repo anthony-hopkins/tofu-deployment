@@ -5,7 +5,7 @@ name: 3 · Destroy
 # Three separate brakes, because this one is not undoable:
 #   1. a typed confirmation phrase that must match the target exactly
 #   2. a snapshot taken and waited on before anything is deleted (default on)
-#   3. the `containerlabs-destroy` environment, which you should protect with
+#   3. the `crackbox-destroy` environment, which you should protect with
 #      required reviewers
 
 on:
@@ -16,7 +16,7 @@ on:
         type: string
         required: true
       confirm:
-        description: 'Type "destroy <instance>" exactly — e.g. destroy lab01'
+        description: 'Type "destroy <instance>" exactly — e.g. destroy crack01'
         type: string
         required: true
       snapshot_first:
@@ -28,7 +28,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: containerlabs-tofu-state
+  group: crackbox-tofu-state
   cancel-in-progress: false
 
 jobs:
@@ -71,13 +71,13 @@ jobs:
     runs-on: ubuntu-latest
 
     # Protect this environment with required reviewers.
-    environment: containerlabs-destroy
+    environment: crackbox-destroy
 
     env:
       VULTR_API_KEY: ${{ secrets.VULTR_API_KEY }}
       AWS_ACCESS_KEY_ID: ${{ secrets.TFSTATE_ACCESS_KEY }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.TFSTATE_SECRET_KEY }}
-      PROJECT: ${{ vars.PROJECT || 'containerlabs' }}
+      PROJECT: ${{ vars.PROJECT || 'crackbox' }}
       TF_IN_AUTOMATION: "1"
 
     steps:

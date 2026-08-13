@@ -16,13 +16,13 @@ locals {
       snapshot_id = cfg.snapshot_id
 
       # --- naming ----------------------------------------------------------
-      # "lab01.dhs-labs.us", or "containerlabs-lab01" when dns_zone is empty.
+      # "crack01.dhs-labs.us", or "crackbox-crack01" when dns_zone is empty.
       fqdn  = coalesce(cfg.hostname, local.default_name[name])
       label = coalesce(cfg.label, local.default_name[name])
 
       # cloud-init wants the short name in `hostname` and the full name in
       # `fqdn`; handing it an FQDN for both produces a host called
-      # "lab01.dhs-labs.us" with a trailing-dot mess in /etc/hosts.
+      # "crack01.dhs-labs.us" with a trailing-dot mess in /etc/hosts.
       short_hostname = split(".", coalesce(cfg.hostname, local.default_name[name]))[0]
 
       # `instance:<key>` is what scripts/lib.sh resolves a machine by, so the
@@ -50,8 +50,8 @@ locals {
       backups         = cfg.backups == null ? var.defaults.backups : cfg.backups
       backup_schedule = cfg.backup_schedule
 
-      # --- lab payload -----------------------------------------------------
-      docker           = cfg.docker == null ? var.defaults.docker : cfg.docker
+      # --- payload ---------------------------------------------------------
+      hashcat          = cfg.hashcat == null ? var.defaults.hashcat : cfg.hashcat
       extra_packages   = cfg.extra_packages
       extra_cloud_init = cfg.extra_cloud_init
     }
@@ -62,32 +62,42 @@ locals {
     var.dns_zone == "" ? "${var.project}-${name}" : "${name}.${var.dns_zone}"
   }
 
-  # --- cEOS lab image ---------------------------------------------------------
-  # img_enabled/img_disabled feed the all-or-nothing precondition in main.tf;
-  # only img_enabled turns the download on in the cloud-init template.
-  img_settings = {
-    IMG_DIRECTORY  = var.img_directory
-    IMG_ENDPOINT   = var.img_endpoint
-    IMG_BUCKET     = var.img_bucket
-    IMG_NAME       = var.img_name
-    IMG_ACCESS_KEY = var.img_access_key
-    IMG_SECRET_KEY = var.img_secret_key
+  # --- Wordlist corpus --------------------------------------------------------
+  # wordlist_enabled/wordlist_disabled feed the all-or-nothing precondition in
+  # main.tf; only wordlist_enabled turns the download on in the cloud-init
+  # template.
+  wordlist_settings = {
+    WORDLIST_DIRECTORY  = var.wordlist_directory
+    WORDLIST_ENDPOINT   = var.wordlist_endpoint
+    WORDLIST_BUCKET     = var.wordlist_bucket
+    WORDLIST_NAMES      = var.wordlist_names
+    WORDLIST_ACCESS_KEY = var.wordlist_access_key
+    WORDLIST_SECRET_KEY = var.wordlist_secret_key
   }
 
-  img_enabled  = alltrue([for v in values(local.img_settings) : v != ""])
-  img_disabled = alltrue([for v in values(local.img_settings) : v == ""])
+  wordlist_enabled  = alltrue([for v in values(local.wordlist_settings) : v != ""])
+  wordlist_disabled = alltrue([for v in values(local.wordlist_settings) : v == ""])
+
+  # Whether anything in the fleet would actually take delivery of a corpus.
+  # Fleet-wide rather than per-instance on purpose: a mix of cracking boxes and
+  # a hashcat = false jumpbox is a legitimate fleet, and the corpus simply is
+  # not for the jumpbox. What is worth failing on is a configured corpus that
+  # *nothing* will download.
+  any_hashcat = anytrue([for e in values(local.effective) : e.hashcat])
 
   # The README documents TFSTATE_ENDPOINT with its https:// scheme, so accept
   # the same shape here. curl needs the bare host, and its --aws-sigv4 signing
   # region is the endpoint's first DNS label (ewr1.vultrobjects.com -> ewr1).
-  img_host   = trimsuffix(trimprefix(trimprefix(var.img_endpoint, "https://"), "http://"), "/")
-  img_region = split(".", local.img_host)[0]
+  wordlist_host   = trimsuffix(trimprefix(trimprefix(var.wordlist_endpoint, "https://"), "http://"), "/")
+  wordlist_region = split(".", local.wordlist_host)[0]
 
-  # The EOS release carried in the tarball name (cEOS64-lab-4.36.0F.tar.xz ->
-  # 4.36.0F). Course topologies pin their image reference to it, so cloud-init
-  # tags the import with it alongside ceos:latest. Empty when the name holds
-  # no parseable version; the import then only gets ceos:latest.
-  img_version = try(regex("\\d+(?:\\.\\d+)+[A-Z]*", var.img_name), "")
+  # WORDLIST_NAMES is one string so it can live in a GitHub repository variable.
+  # Commas and whitespace both separate, so "a.txt.gz, b.txt.gz" and a
+  # newline-per-key block both work; compact() drops what trailing separators
+  # leave behind.
+  wordlist_keys = compact([
+    for k in split(",", replace(var.wordlist_names, "/\\s+/", ",")) : trimspace(k)
+  ])
 
   # Distinct lookups only: an OS or key shared by ten instances is fetched once.
   os_names = toset([

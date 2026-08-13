@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Read-only health report for the containerlabs fleet.
+# Read-only health report for the crackbox fleet.
 #
 # Makes no changes to anything. Exits non-zero when it finds a problem, so the
 # workflow goes red and shows up in the Actions list without anyone reading the
@@ -12,7 +12,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source=./lib.sh
 . "${ROOT}/scripts/lib.sh"
 
-PROJECT="${PROJECT:-containerlabs}"
+PROJECT="${PROJECT:-crackbox}"
 
 NEEDLE=""
 PORTS="22"
@@ -31,7 +31,7 @@ Usage: diagnose.sh [options]
 
 Environment:
   VULTR_API_KEY   required
-  PROJECT         project tag/prefix (default: containerlabs)
+  PROJECT         project tag/prefix (default: crackbox)
 EOF
 }
 
@@ -301,7 +301,7 @@ REPORT="$(mktemp)"
 trap 'rm -f "$REPORT"' EXIT
 
 {
-  printf '# containerlabs diagnostics\n\n'
+  printf '# crackbox diagnostics\n\n'
   printf '_project `%s`, generated %s_\n\n' "$PROJECT" "$(date -u '+%Y-%m-%d %H:%M:%SZ')"
 
   account_section

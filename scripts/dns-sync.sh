@@ -24,7 +24,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source=./lib.sh
 . "${ROOT}/scripts/lib.sh"
 
-PROJECT="${PROJECT:-containerlabs}"
+PROJECT="${PROJECT:-crackbox}"
 
 RECORDS_JSON=""
 PRUNE=0
@@ -50,7 +50,7 @@ Usage: dns-sync.sh [options]
 Environment:
   CLOUDFLARE_API_TOKEN  required; needs Zone:Read + DNS:Edit on the zone
   PROJECT               project tag, part of the ownership comment
-                        (default: containerlabs)
+                        (default: crackbox)
 EOF
 }
 

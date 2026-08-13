@@ -47,7 +47,7 @@ jobs:
 
     env:
       VULTR_API_KEY: ${{ secrets.VULTR_API_KEY }}
-      PROJECT: ${{ vars.PROJECT || 'containerlabs' }}
+      PROJECT: ${{ vars.PROJECT || 'crackbox' }}
 
     steps:
       - uses: actions/checkout@v7
@@ -84,7 +84,7 @@ jobs:
     # Only this job touches state, so only this job queues behind
     # plan / apply / destroy.
     concurrency:
-      group: containerlabs-tofu-state
+      group: crackbox-tofu-state
       cancel-in-progress: false
 
     env:

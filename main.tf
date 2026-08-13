@@ -31,27 +31,25 @@ resource "vultr_instance" "this" {
     instance_key = each.key
     hostname     = each.value.short_hostname
     fqdn         = each.value.fqdn
-    docker       = each.value.docker
+    hashcat      = each.value.hashcat
+    data_mount   = var.data_mount
 
     # Vultr only injects ssh_key_ids into root/linuxuser, so the admin user
     # gets the same public keys planted via cloud-init.
     admin_user      = var.admin_user
     ssh_public_keys = [for n in each.value.ssh_key_names : trimspace(data.vultr_ssh_key.this[n].ssh_key)]
 
-    # null when the IMG_* variables are unset; the template then renders no
-    # image directory, download script or docker import.
-    img = local.img_enabled ? {
-      directory  = var.img_directory
-      host       = local.img_host
-      region     = local.img_region
-      bucket     = var.img_bucket
-      name       = var.img_name
-      version    = local.img_version
-      access_key = var.img_access_key
-      secret_key = var.img_secret_key
+    # null when the WORDLIST_* variables are unset; the template then renders
+    # no download script and the box comes up with empty wordlists/.
+    wordlists = local.wordlist_enabled ? {
+      directory  = var.wordlist_directory
+      host       = local.wordlist_host
+      region     = local.wordlist_region
+      bucket     = var.wordlist_bucket
+      keys       = local.wordlist_keys
+      access_key = var.wordlist_access_key
+      secret_key = var.wordlist_secret_key
     } : null
-
-    course_repo = var.course_repo
 
     extra_packages = each.value.extra_packages
     extra          = each.value.extra_cloud_init
@@ -71,7 +69,7 @@ resource "vultr_instance" "this" {
     }
   }
 
-  # These labs are cattle; skip the per-deploy mail.
+  # These boxes are cattle; skip the per-deploy mail.
   activation_email = false
 
   # Cross-field rules live here rather than in variable validation because they
@@ -91,12 +89,28 @@ resource "vultr_instance" "this" {
       error_message = "Instance \"${each.key}\" sets backup_schedule but resolves to backups = false. Set backups = true on the instance, or in var.defaults."
     }
 
-    # The cEOS image settings are all-or-nothing. Failing the plan on a
-    # partial set beats silently skipping the download and shipping labs
-    # without their image.
+    # The wordlist settings are all-or-nothing. Failing the plan on a partial
+    # set beats silently skipping the download and paying for a 32-core box
+    # that has nothing to crack against.
     precondition {
-      condition     = local.img_enabled || local.img_disabled
-      error_message = "The cEOS image settings are partially configured. Set all of IMG_DIRECTORY, IMG_ENDPOINT, IMG_BUCKET, IMG_NAME (repository variables) and IMG_ACCESS_KEY, IMG_SECRET_KEY (repository secrets) -- TF_VAR_img_* locally -- or none of them."
+      condition     = local.wordlist_enabled || local.wordlist_disabled
+      error_message = "The wordlist settings are partially configured. Set all of WORDLIST_DIRECTORY, WORDLIST_ENDPOINT, WORDLIST_BUCKET, WORDLIST_NAMES (repository variables) and WORDLIST_ACCESS_KEY, WORDLIST_SECRET_KEY (repository secrets) -- TF_VAR_wordlist_* locally -- or none of them."
+    }
+
+    # "  " is neither empty nor a usable key list, and would otherwise render a
+    # fetch script with no objects in it.
+    precondition {
+      condition     = !local.wordlist_enabled || length(local.wordlist_keys) > 0
+      error_message = "WORDLIST_NAMES contains no object keys. Give it a comma- or whitespace-separated list, e.g. \"rockyou.txt.gz, corpora/weakpass_4.txt.gz\"."
+    }
+
+    # The fetch script only exists inside the hashcat payload. A single
+    # hashcat = false box alongside cracking boxes is fine -- the corpus is not
+    # for it -- but a corpus configured for a fleet where *nothing* has hashcat
+    # enabled downloads nowhere, and is worth failing on.
+    precondition {
+      condition     = !local.wordlist_enabled || local.any_hashcat
+      error_message = "The WORDLIST_* settings are configured, but no instance has hashcat enabled, so the corpus would never be downloaded. Enable hashcat on at least one instance, or clear the WORDLIST_* settings."
     }
 
     precondition {

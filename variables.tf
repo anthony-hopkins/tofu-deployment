@@ -1,7 +1,7 @@
 variable "project" {
   description = "Short name used as the ownership tag on every instance."
   type        = string
-  default     = "containerlabs"
+  default     = "crackbox"
 
   validation {
     condition     = can(regex("^[a-z0-9][a-z0-9-]{1,20}$", var.project))
@@ -11,9 +11,9 @@ variable "project" {
 
 variable "dns_zone" {
   description = <<-EOT
-    DNS zone the labs sit under. When set, an instance's hostname and label
-    default to "<key>.<dns_zone>" -- matching the existing
-    containerlabs.dhs-labs.us box. Set to "" to fall back to "<project>-<key>".
+    DNS zone the boxes sit under. When set, an instance's hostname and label
+    default to "<key>.<dns_zone>" -- e.g. "crack01.dhs-labs.us". Set to "" to
+    fall back to "<project>-<key>".
 
     This only shapes names. Nothing here creates DNS records.
   EOT
@@ -24,7 +24,6 @@ variable "dns_zone" {
 variable "defaults" {
   description = <<-EOT
     The baseline every instance inherits unless it overrides the field.
-    Modelled on the existing containerlabs.dhs-labs.us instance.
 
     Because these are defaults rather than per-instance settings, changing one
     here re-plans every instance that has not overridden it. plan and region
@@ -33,11 +32,13 @@ variable "defaults" {
   EOT
 
   type = object({
-    plan        = optional(string, "vhp-4c-12gb-amd")      # 4 vCPU, 12 GB, 260 GB AMD NVMe
-    region      = optional(string, "lax")                  # Los Angeles
+    # 32 vCPU / 128 GB RAM / 1920 GB storage, AMD. See instances.auto.tfvars
+    # for why this is the -1920s variant and not the bare vx1-g-32c-128g.
+    plan        = optional(string, "vx1-g-32c-128g-1920s")
+    region      = optional(string, "sea")                  # Seattle
     os_name     = optional(string, "Ubuntu 26.04 LTS x64") # os_id 2760
     user_scheme = optional(string, "root")
-    docker      = optional(bool, true)
+    hashcat     = optional(bool, true)
     enable_ipv6 = optional(bool, true)
     backups     = optional(bool, false)
   })
@@ -63,10 +64,10 @@ variable "defaults" {
 variable "admin_user" {
   description = <<-EOT
     Admin account cloud-init creates on every instance. It receives the
-    instance's SSH public keys, passwordless sudo, docker group membership
-    (when docker is enabled), and a random password generated on the machine
-    itself -- printed only to the serial console, never stored in state. Root
-    SSH login is disabled in its favor.
+    instance's SSH public keys, passwordless sudo, ownership of the data
+    mount, and a random password generated on the machine itself -- printed
+    only to the serial console, never stored in state. Root SSH login is
+    disabled in its favor.
   EOT
   type        = string
   default     = "ahopkins"
@@ -77,62 +78,82 @@ variable "admin_user" {
   }
 }
 
-variable "course_repo" {
+variable "data_mount" {
   description = <<-EOT
-    Git repository cloud-init clones into the admin user's home on
-    docker-enabled instances (public URL, no auth). Its common/host-image/
-    directory is built as the netcourse-host:latest Docker image on first
-    boot; the clone stays in the home directory afterwards. Set to "" to
-    skip the clone and build.
+    Where the bulk storage is mounted on hashcat instances, and the parent of
+    the wordlists/, hashes/, rules/ and sessions/ working directories.
+
+    The vx1 plans carry their storage as a separate device rather than as room
+    on the root disk, so cloud-init looks for the largest unformatted, unmounted
+    disk and mounts it here by UUID. When there is no such device -- a plan with
+    everything on the root disk, or a re-run -- the directories are simply
+    created in place and the mount is skipped.
   EOT
   type        = string
-  default     = "https://github.com/anthony-hopkins/network-course.git"
+  default     = "/data"
+
+  validation {
+    condition     = startswith(var.data_mount, "/") && var.data_mount != "/"
+    error_message = "data_mount must be an absolute path below the root, e.g. /data."
+  }
 }
 
-# --- cEOS lab image (IMG_* repository variables) -----------------------------
-# In CI these arrive as TF_VAR_img_* from the GitHub repository variables and
-# secrets of the same (upper-case) names. They are all-or-nothing: set all six
-# to have cloud-init download the image on docker-enabled instances, leave all
-# six unset to skip it. A partial set fails the plan (precondition in main.tf).
+# --- Wordlist corpus (WORDLIST_* repository variables) ------------------------
+# In CI these arrive as TF_VAR_wordlist_* from the GitHub repository variables
+# and secrets of the same (upper-case) names. They are all-or-nothing: set all
+# six to have cloud-init pull the dictionaries onto hashcat instances, leave all
+# six unset to skip it and upload them yourself. A partial set fails the plan
+# (precondition in main.tf).
 
-variable "img_directory" {
-  description = "Absolute path where the cEOS tarball is staged on docker-enabled instances (GitHub variable IMG_DIRECTORY). Purely transient: the tarball and the directory are both removed after the docker import, leaving only the Docker image."
+variable "wordlist_directory" {
+  description = "Absolute path the dictionaries are downloaded to. Normally <data_mount>/wordlists, so they land on the bulk disk rather than the root filesystem (GitHub variable WORDLIST_DIRECTORY)."
   type        = string
   default     = ""
 
   validation {
-    condition     = var.img_directory == "" || startswith(var.img_directory, "/")
-    error_message = "img_directory must be an absolute path, e.g. /opt/images."
+    condition     = var.wordlist_directory == "" || startswith(var.wordlist_directory, "/")
+    error_message = "wordlist_directory must be an absolute path, e.g. /data/wordlists."
   }
 }
 
-variable "img_endpoint" {
-  description = "Vultr Object Storage endpoint hosting the cEOS image, with or without the https:// scheme, e.g. \"https://ewr1.vultrobjects.com\" (GitHub variable IMG_ENDPOINT)."
+variable "wordlist_endpoint" {
+  description = "Vultr Object Storage endpoint hosting the dictionaries, with or without the https:// scheme, e.g. \"https://ewr1.vultrobjects.com\" (GitHub variable WORDLIST_ENDPOINT)."
   type        = string
   default     = ""
 }
 
-variable "img_bucket" {
-  description = "Object storage bucket holding the cEOS image (GitHub variable IMG_BUCKET)."
+variable "wordlist_bucket" {
+  description = "Object storage bucket holding the dictionaries (GitHub variable WORDLIST_BUCKET)."
   type        = string
   default     = ""
 }
 
-variable "img_name" {
-  description = "Object key of the cEOS image tarball, e.g. cEOS64-lab-4.32.2F.tar.xz (GitHub variable IMG_NAME). Also the filename it lands under in img_directory, and the source of the version tag: the release in the name (4.32.2F) becomes a ceos:<version> tag alongside ceos:latest."
+variable "wordlist_names" {
+  description = <<-EOT
+    Object keys to download, separated by commas or whitespace (GitHub variable
+    WORDLIST_NAMES). A plain string rather than a list so it can be pasted
+    straight into a GitHub repository variable:
+
+      rockyou.txt.gz, corpora/weakpass_4.txt.gz, rules/best64.rule
+
+    Each key keeps its basename on disk, so a prefixed key lands flat in
+    wordlist_directory. Files are stored exactly as downloaded and are not
+    unpacked -- hashcat 6 reads gzip-compressed wordlists natively, and a
+    100 GB dictionary is better left compressed.
+  EOT
   type        = string
   default     = ""
 }
 
-variable "img_access_key" {
-  description = "Object storage access key for the image bucket (GitHub secret IMG_ACCESS_KEY). Embedded in cloud-init user data -- treat instance user data as sensitive."
+variable "wordlist_access_key" {
+  description = "Object storage access key for the wordlist bucket (GitHub secret WORDLIST_ACCESS_KEY). Embedded in cloud-init user data -- treat instance user data as sensitive."
   type        = string
   default     = ""
   sensitive   = true
 }
 
-variable "img_secret_key" {
-  description = "Object storage secret key for the image bucket (GitHub secret IMG_SECRET_KEY). Embedded in cloud-init user data -- treat instance user data as sensitive."
+variable "wordlist_secret_key" {
+  description = "Object storage secret key for the wordlist bucket (GitHub secret WORDLIST_SECRET_KEY). Embedded in cloud-init user data -- treat instance user data as sensitive."
   type        = string
   default     = ""
   sensitive   = true
@@ -163,9 +184,9 @@ variable "ssh_key_names" {
 
 variable "instances" {
   description = <<-EOT
-    The lab fleet, keyed by short instance name.
+    The fleet, keyed by short instance name.
 
-    Every field except the map key is optional: `lab01 = {}` gets you the full
+    Every field except the map key is optional: `crack01 = {}` gets you the full
     var.defaults baseline. Set a field to override just that one.
 
     The map key is the for_each key, the DNS label, and the value stamped into
@@ -208,8 +229,10 @@ variable "instances" {
       dom  = optional(number)          # 1-28, for type=monthly
     }))
 
-    # --- Lab payload (rendered into cloud-init) -----------------------------
-    docker           = optional(bool)
+    # --- Payload (rendered into cloud-init) ---------------------------------
+    # hashcat = false leaves a plain hardened Ubuntu box: no cracking toolchain,
+    # no data mount, no wordlist download.
+    hashcat          = optional(bool)
     extra_packages   = optional(list(string), [])
     extra_cloud_init = optional(string) # raw YAML merged in as top-level keys
   }))

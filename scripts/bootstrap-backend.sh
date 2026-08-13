@@ -9,7 +9,7 @@
 # OpenTofu needs in order to speak to *.vultrobjects.com.
 #
 #   export VULTR_API_KEY=...
-#   scripts/bootstrap-backend.sh --bucket containerlabs-tfstate
+#   scripts/bootstrap-backend.sh --bucket crackbox-tfstate
 #
 # Idempotent: re-running against an existing bucket just rewrites backend.hcl.
 
@@ -19,7 +19,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source=./lib.sh
 . "${ROOT}/scripts/lib.sh"
 
-BUCKET="containerlabs-tfstate"
+BUCKET="crackbox-tfstate"
 SUBSCRIPTION=""
 REGION="us-east-1"
 VERSIONING=1
@@ -31,7 +31,7 @@ usage() {
   cat <<'EOF'
 Usage: bootstrap-backend.sh [options]
 
-  --bucket NAME         Bucket to hold OpenTofu state (default: containerlabs-tfstate)
+  --bucket NAME         Bucket to hold OpenTofu state (default: crackbox-tfstate)
   --subscription NAME   Object Storage subscription, by label or ID.
                         Optional when the account has exactly one.
   --region REGION       SigV4 signing region (default: us-east-1). Vultr ignores

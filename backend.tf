@@ -21,7 +21,7 @@ terraform {
   # See backend.hcl.example, `make backend.hcl`, and the tofu-init composite
   # action which writes the same file from repository variables in CI.
   backend "s3" {
-    key = "containerlabs/terraform.tfstate"
+    key = "crackbox/terraform.tfstate"
 
     # Vultr Object Storage speaks S3 but is not AWS. Each of these disables an
     # AWS-only preflight call that would otherwise fail against the Vultr

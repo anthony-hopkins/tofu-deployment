@@ -9,7 +9,7 @@
 #
 # No credentials live here. They come from the environment; see backend.tf.
 
-bucket = "containerlabs-tfstate"
+bucket = "crackbox-tfstate"
 
 # Signing region only. Vultr ignores it, but the S3 protocol requires a
 # syntactically valid region to compute the request signature. It does NOT
