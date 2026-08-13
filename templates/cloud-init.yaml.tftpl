@@ -151,59 +151,15 @@ write_files:
         "$MOUNT/hashes" \
         "$MOUNT/rules" \
         "$MOUNT/sessions"
-%{ if wordlists != null ~}
-
-  # Root-only: this script embeds the object storage credentials.
-  - path: /opt/crackbox/fetch-wordlists.sh
-    permissions: "0700"
-    content: |
-      #!/usr/bin/env bash
-      set -euo pipefail
-
-      DEST='${wordlists.directory}'
-      OWNER='${admin_user}'
-
-      install -d -m 0755 -o "$OWNER" -g "$OWNER" "$DEST"
-
-      # Signed S3 GET via curl's SigV4 support -- no aws-cli needed. The
-      # signing region is the endpoint's first DNS label.
-      #
-      # Files land under their basename and are stored exactly as downloaded:
-      # hashcat reads gzip-compressed wordlists natively, so unpacking a
-      # hundred-gigabyte dictionary would only cost disk.
-      fetch() {
-        local key="$1"
-        local out="$DEST/$(basename "$key")"
-
-        echo "crackbox: fetching $key"
-        curl -fsSL --retry 5 --retry-delay 10 --retry-connrefused \
-          --user '${wordlists.access_key}:${wordlists.secret_key}' \
-          --aws-sigv4 "aws:amz:${wordlists.region}:s3" \
-          -o "$out" \
-          "https://${wordlists.host}/${wordlists.bucket}/$key"
-
-        chown "$OWNER:$OWNER" "$out"
-      }
-
-%{ for key in wordlists.keys ~}
-      fetch '${key}'
-%{ endfor ~}
-%{ endif ~}
 %{ endif ~}
 
 runcmd:
-  # First, before anything slow. The hardened sshd config written above is
-  # inert until sshd reloads, and the wordlist download further down can run
-  # for hours -- applying it here closes that window instead of leaving
-  # password authentication live for the length of a corpus transfer.
+  # First, before the package work. The hardened sshd config written above is
+  # inert until sshd reloads, and you will want to be uploading dictionaries
+  # over a key-only sshd rather than one still accepting passwords.
   - [systemctl, restart, ssh]
 %{ if hashcat ~}
   - [bash, /opt/crackbox/mount-data.sh]
-%{ if wordlists != null ~}
-  - [bash, /opt/crackbox/fetch-wordlists.sh]
-  # It has done its job and it holds the object storage credentials.
-  - [rm, -f, /opt/crackbox/fetch-wordlists.sh]
-%{ endif ~}
   # Proof that the OpenCL runtime came up and hashcat can see the threads.
   # Recorded rather than asserted: a box whose backend failed should still
   # finish booting so you can log in and read this file.

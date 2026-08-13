@@ -41,10 +41,8 @@ ssh_key_names = [
   "kubuntu26-de",
 ]
 
-# The dictionary corpus is NOT configured here. WORDLIST_* is all-or-nothing
-# and two of the six are object storage credentials, which do not belong in a
-# committed file -- they arrive as TF_VAR_wordlist_* from the environment
-# locally and from repository variables/secrets in CI. See the README.
+# Dictionaries are uploaded by hand -- cloud-init creates /data/wordlists and
+# leaves it empty. See "Getting dictionaries onto the box" in the README.
 
 instances = {
   crack01 = {}

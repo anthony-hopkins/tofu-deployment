@@ -39,18 +39,6 @@ resource "vultr_instance" "this" {
     admin_user      = var.admin_user
     ssh_public_keys = [for n in each.value.ssh_key_names : trimspace(data.vultr_ssh_key.this[n].ssh_key)]
 
-    # null when the WORDLIST_* variables are unset; the template then renders
-    # no download script and the box comes up with empty wordlists/.
-    wordlists = local.wordlist_enabled ? {
-      directory  = var.wordlist_directory
-      host       = local.wordlist_host
-      region     = local.wordlist_region
-      bucket     = var.wordlist_bucket
-      keys       = local.wordlist_keys
-      access_key = var.wordlist_access_key
-      secret_key = var.wordlist_secret_key
-    } : null
-
     extra_packages = each.value.extra_packages
     extra          = each.value.extra_cloud_init
   })
@@ -87,30 +75,6 @@ resource "vultr_instance" "this" {
     precondition {
       condition     = each.value.backup_schedule == null || each.value.backups
       error_message = "Instance \"${each.key}\" sets backup_schedule but resolves to backups = false. Set backups = true on the instance, or in var.defaults."
-    }
-
-    # The wordlist settings are all-or-nothing. Failing the plan on a partial
-    # set beats silently skipping the download and paying for a 32-core box
-    # that has nothing to crack against.
-    precondition {
-      condition     = local.wordlist_enabled || local.wordlist_disabled
-      error_message = "The wordlist settings are partially configured. Set all of WORDLIST_DIRECTORY, WORDLIST_ENDPOINT, WORDLIST_BUCKET, WORDLIST_NAMES (repository variables) and WORDLIST_ACCESS_KEY, WORDLIST_SECRET_KEY (repository secrets) -- TF_VAR_wordlist_* locally -- or none of them."
-    }
-
-    # "  " is neither empty nor a usable key list, and would otherwise render a
-    # fetch script with no objects in it.
-    precondition {
-      condition     = !local.wordlist_enabled || length(local.wordlist_keys) > 0
-      error_message = "WORDLIST_NAMES contains no object keys. Give it a comma- or whitespace-separated list, e.g. \"rockyou.txt.gz, corpora/weakpass_4.txt.gz\"."
-    }
-
-    # The fetch script only exists inside the hashcat payload. A single
-    # hashcat = false box alongside cracking boxes is fine -- the corpus is not
-    # for it -- but a corpus configured for a fleet where *nothing* has hashcat
-    # enabled downloads nowhere, and is worth failing on.
-    precondition {
-      condition     = !local.wordlist_enabled || local.any_hashcat
-      error_message = "The WORDLIST_* settings are configured, but no instance has hashcat enabled, so the corpus would never be downloaded. Enable hashcat on at least one instance, or clear the WORDLIST_* settings."
     }
 
     precondition {

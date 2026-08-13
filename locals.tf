@@ -62,43 +62,6 @@ locals {
     var.dns_zone == "" ? "${var.project}-${name}" : "${name}.${var.dns_zone}"
   }
 
-  # --- Wordlist corpus --------------------------------------------------------
-  # wordlist_enabled/wordlist_disabled feed the all-or-nothing precondition in
-  # main.tf; only wordlist_enabled turns the download on in the cloud-init
-  # template.
-  wordlist_settings = {
-    WORDLIST_DIRECTORY  = var.wordlist_directory
-    WORDLIST_ENDPOINT   = var.wordlist_endpoint
-    WORDLIST_BUCKET     = var.wordlist_bucket
-    WORDLIST_NAMES      = var.wordlist_names
-    WORDLIST_ACCESS_KEY = var.wordlist_access_key
-    WORDLIST_SECRET_KEY = var.wordlist_secret_key
-  }
-
-  wordlist_enabled  = alltrue([for v in values(local.wordlist_settings) : v != ""])
-  wordlist_disabled = alltrue([for v in values(local.wordlist_settings) : v == ""])
-
-  # Whether anything in the fleet would actually take delivery of a corpus.
-  # Fleet-wide rather than per-instance on purpose: a mix of cracking boxes and
-  # a hashcat = false jumpbox is a legitimate fleet, and the corpus simply is
-  # not for the jumpbox. What is worth failing on is a configured corpus that
-  # *nothing* will download.
-  any_hashcat = anytrue([for e in values(local.effective) : e.hashcat])
-
-  # The README documents TFSTATE_ENDPOINT with its https:// scheme, so accept
-  # the same shape here. curl needs the bare host, and its --aws-sigv4 signing
-  # region is the endpoint's first DNS label (ewr1.vultrobjects.com -> ewr1).
-  wordlist_host   = trimsuffix(trimprefix(trimprefix(var.wordlist_endpoint, "https://"), "http://"), "/")
-  wordlist_region = split(".", local.wordlist_host)[0]
-
-  # WORDLIST_NAMES is one string so it can live in a GitHub repository variable.
-  # Commas and whitespace both separate, so "a.txt.gz, b.txt.gz" and a
-  # newline-per-key block both work; compact() drops what trailing separators
-  # leave behind.
-  wordlist_keys = compact([
-    for k in split(",", replace(var.wordlist_names, "/\\s+/", ",")) : trimspace(k)
-  ])
-
   # Distinct lookups only: an OS or key shared by ten instances is fetched once.
   os_names = toset([
     for name, e in local.effective : e.os_name

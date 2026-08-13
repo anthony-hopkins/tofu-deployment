@@ -4,10 +4,9 @@ OpenTofu-managed Vultr compute instances for running **hashcat against large
 dictionaries** in a home lab, driven entirely from manually-triggered GitHub
 Actions workflows.
 
-A box comes up with hashcat and a working OpenCL runtime, its bulk storage
-formatted and mounted at `/data`, and — optionally — a dictionary corpus
-already pulled down from Vultr Object Storage. Rent it by the hour, crack,
-snapshot, destroy.
+A box comes up with hashcat and a working OpenCL runtime and its bulk storage
+formatted and mounted at `/data`, ready for you to upload dictionaries into.
+Rent it by the hour, crack, snapshot, destroy.
 
 Five operations, five workflows, all `workflow_dispatch`:
 
@@ -225,8 +224,6 @@ Secrets:
 | `TFSTATE_ACCESS_KEY` | Vultr Object Storage S3 access key |
 | `TFSTATE_SECRET_KEY` | Vultr Object Storage S3 secret key |
 | `CLOUDFLARE_API_TOKEN` | Optional. Enables automatic A/AAAA record sync; needs **Zone:Read + DNS:Edit** on the zone. |
-| `WORDLIST_ACCESS_KEY` | Optional*. Vultr Object Storage access key for the dictionary bucket. |
-| `WORDLIST_SECRET_KEY` | Optional*. Vultr Object Storage secret key for the dictionary bucket. |
 
 The state keys come from `scripts/bootstrap-backend.sh --print-secrets`. The
 Cloudflare token is created at **My Profile → API Tokens** with the *Edit zone
@@ -243,35 +240,10 @@ Variables:
 | `TFSTATE_ENDPOINT` | `https://ewr1.vultrobjects.com` | Must match `endpoints.s3` in your generated `backend.hcl`. |
 | `PROJECT` | `crackbox` | Optional. Must match `project` in tfvars. |
 | `TOFU_VERSION` | `1.12.5` | Optional. Defaults to 1.12.5. |
-| `WORDLIST_DIRECTORY` | `/data/wordlists` | Optional*. Where the dictionaries land. Keep it under `/data` so they go on the bulk disk, not the root filesystem. |
-| `WORDLIST_ENDPOINT` | `https://ewr1.vultrobjects.com` | Optional*. Object storage endpoint hosting the corpus. |
-| `WORDLIST_BUCKET` | `wordlists` | Optional*. Bucket holding the corpus. |
-| `WORDLIST_NAMES` | `rockyou.txt.gz, corpora/weakpass_4.txt.gz, rules/best64.rule` | Optional*. Object keys, comma- or whitespace-separated. |
 
-\* The six `WORDLIST_*` settings are all-or-nothing. Set every one and each
-hashcat instance downloads those objects into `WORDLIST_DIRECTORY` on first
-boot, via signed S3 `GET`s (curl's `--aws-sigv4`, no aws-cli involved). Set
-none of the six and the download is skipped — the box still comes up with an
-empty `/data/wordlists` for you to `rsync` into. A partial set fails the plan,
-and so does configuring a corpus for a fleet in which *no* instance has
-hashcat enabled — it would download nowhere. A `hashcat = false` box sitting
-alongside cracking boxes is fine; the corpus simply is not for it.
-
-Each key keeps only its basename on disk, so `corpora/weakpass_4.txt.gz` lands
-as `/data/wordlists/weakpass_4.txt.gz`. Files are stored **exactly as
-downloaded and are never unpacked**: hashcat reads gzip-compressed wordlists
-natively, so decompressing a hundred-gigabyte dictionary would cost disk and
-buy nothing.
-
-The credentials are baked into the instance's cloud-init user data, so treat
-user data (and saved plans) as sensitive once these are configured. On the
-instance the fetch script is mode `0700` and is deleted as soon as it has run.
-
-> A large corpus makes first boot **long** — cloud-init runs the download
-> synchronously, and hundreds of gigabytes over a shared 15 Gbps link takes
-> what it takes. SSH is available throughout (the hardened sshd config is
-> applied *before* the download starts, deliberately); `/etc/crackbox/ready`
-> appears only when everything has finished.
+Dictionaries are not configured here — you upload them yourself once the box
+is up. See [Getting dictionaries onto the
+box](#getting-dictionaries-onto-the-box).
 
 Or from the CLI:
 
@@ -283,29 +255,7 @@ gh secret set CLOUDFLARE_API_TOKEN   # optional: automatic A/AAAA record sync
 gh variable set TFSTATE_BUCKET   --body crackbox-tfstate
 gh variable set TFSTATE_REGION   --body us-east-1
 gh variable set TFSTATE_ENDPOINT --body https://ewr1.vultrobjects.com
-
-# Optional, all-or-nothing: dictionary corpus download on hashcat instances.
-gh secret set WORDLIST_ACCESS_KEY
-gh secret set WORDLIST_SECRET_KEY
-gh variable set WORDLIST_DIRECTORY --body /data/wordlists
-gh variable set WORDLIST_ENDPOINT  --body https://ewr1.vultrobjects.com
-gh variable set WORDLIST_BUCKET    --body wordlists
-gh variable set WORDLIST_NAMES     --body 'rockyou.txt.gz, corpora/weakpass_4.txt.gz'
 ```
-
-Locally the same six are `TF_VAR_wordlist_*`:
-
-```bash
-export TF_VAR_wordlist_directory=/data/wordlists
-export TF_VAR_wordlist_endpoint=https://ewr1.vultrobjects.com
-export TF_VAR_wordlist_bucket=wordlists
-export TF_VAR_wordlist_names='rockyou.txt.gz, corpora/weakpass_4.txt.gz'
-export TF_VAR_wordlist_access_key=…
-export TF_VAR_wordlist_secret_key=…
-```
-
-They are deliberately *not* in [instances.auto.tfvars](instances.auto.tfvars):
-two of the six are credentials, and that file is committed.
 
 ### Step 5 — Environments (the approval gate)
 
@@ -356,9 +306,7 @@ instances = {
 
 `hashcat = false` here on purpose: this step is proving the *deployment
 machinery*, and installing hashcat plus an OpenCL runtime on a 1 vCPU box
-proves nothing you need yet. Leave the `WORDLIST_*` settings unset for the
-rehearsal too — a corpus configured for a fleet where nothing has hashcat
-enabled fails the plan by design, since it would download nowhere.
+proves nothing you need yet.
 
 `ssh_key_names` is not optional. cloud-init sets `PasswordAuthentication no` on
 first boot, so an instance with no key is reachable only through the Vultr web
@@ -399,8 +347,7 @@ instances = {
 ```
 
 PR → read the plan → merge → **2 · Apply**. This is the point at which the
-meter starts at $1.223/hr, and where a configured `WORDLIST_*` corpus starts
-downloading.
+meter starts at $1.223/hr.
 
 Once cloud-init finishes, confirm the two things that matter:
 
@@ -431,7 +378,7 @@ Every instance inherits a single baseline:
 | `region` | `sea` | Seattle |
 | `os_name` | `Ubuntu 26.04 LTS x64` | os_id 2760 |
 | `user_scheme` | `root` | |
-| `hashcat` | `true` | hashcat + pocl OpenCL, `/data` mounted, corpus fetched |
+| `hashcat` | `true` | hashcat + pocl OpenCL, `/data` found and mounted |
 | `enable_ipv6` | `true` | |
 | `backups` | `false` | Vultr automatic backups, billed separately |
 
@@ -478,7 +425,7 @@ everything on one disk.
 
 ```
 /data                 the mount point (var.data_mount)
-├── wordlists/        WORDLIST_* downloads land here
+├── wordlists/        dictionaries you upload
 ├── hashes/           target hashes
 ├── rules/            rule files
 └── sessions/         --session restore points
@@ -577,6 +524,35 @@ You want a pocl device reporting 32 compute units. If hashcat declines to use
 it — pocl is not a vendor runtime, and hashcat is conservative about those —
 `--force` is the documented escape hatch, and `-D 1` restricts it to CPU
 devices explicitly.
+
+### Getting dictionaries onto the box
+
+Nothing is downloaded for you. Cloud-init creates `/data/wordlists` owned by
+the admin user and leaves it empty; how the corpus gets there is up to you.
+
+`rsync` over SSH is the usual answer, and the one worth using for anything
+large — it resumes, so a dropped connection halfway through a 100 GB
+dictionary costs you nothing:
+
+```bash
+rsync -avP --partial ./wordlists/ ahopkins@<ip>:/data/wordlists/
+rsync -avP --partial ./rules/     ahopkins@<ip>:/data/rules/
+```
+
+`-P` is `--partial --progress`; re-running the same command picks up where it
+stopped. If you keep your corpus in object storage, pulling it *from* the box
+is faster than pushing from home — `curl`, `rclone` or `s5cmd` on the box
+itself, straight into `/data/wordlists`.
+
+**Leave dictionaries compressed.** hashcat reads gzip wordlists natively, so
+`rockyou.txt.gz` works as an argument exactly like `rockyou.txt` would, and
+decompressing a hundred-gigabyte corpus costs disk and buys nothing. `7zip`,
+`pigz`, `xz-utils` and `zstd` are installed if you do need to repack something.
+
+Keep it all under `/data` — that is the 1920 GB volume. The root filesystem is
+small.
+
+### Running a job
 
 Then, **inside tmux**, because these runs outlive the SSH session:
 
@@ -732,11 +708,12 @@ Object Storage keys for anything that reads state.
 over a map. Adding a box is a two-line tfvars diff reviewable in a PR, and the
 map key doubles as the `-target` address for single-instance operations.
 
-**Why the wordlist corpus is not an OpenTofu resource.** It is bytes on a disk,
-not desired state. Modelling it as one would put object keys — and their
-sizes — in state, and re-uploading a dictionary would be a config edit. So the
-corpus is fetched by cloud-init on first boot from object storage that this
-stack does not manage, exactly as the machine image is.
+**Why the dictionary corpus is outside the stack.** It is bytes on a disk, not
+desired state. Modelling it here would put object keys — and their sizes — into
+state, make re-uploading a dictionary a config edit, and put a multi-hour
+transfer inside cloud-init where nothing can resume it. Uploading over `rsync`
+after the box is up is resumable, interruptible, and needs no credentials baked
+into user data.
 
 **Why `/data` is discovered rather than declared.** The template does not name
 `/dev/vdb`. Device names are not stable across a rebuild, the `vx1` plans and
@@ -806,11 +783,6 @@ running its package upgrade, or the box is rebooting after one.
 console with `cloud-init status --wait`, or read
 `/var/log/cloud-init-output.log`.
 
-**`/etc/crackbox/ready` never appears and the box seems idle.** A configured
-`WORDLIST_*` corpus downloads synchronously during cloud-init; a few hundred
-gigabytes takes a while. `ls -la /data/wordlists` and watch the file grow, or
-tail `/var/log/cloud-init-output.log` for the `crackbox: fetching` lines.
-
 **`df -h /data` shows the root filesystem, not the big disk.** `mount-data.sh`
 only claims a disk that is completely empty — no filesystem, no partition
 table, no mount. Run `lsblk -o NAME,SIZE,FSTYPE,MOUNTPOINT` to see what it
@@ -850,13 +822,12 @@ the `~> 2.32` constraint):
   `storage_type: block_storage`. Both report `gpu_brand: "none"`.
   `Ubuntu 26.04 LTS x64` exists as os_id 2760. All checked against the live
   public Vultr catalogue.
-- The cloud-init template was rendered and parsed as YAML across four
-  combinations: hashcat with a corpus, hashcat without one, `hashcat = false`,
-  and `extra_packages` + `extra_cloud_init`.
-- The two shell scripts the template embeds were extracted from the rendered
-  YAML and pass `bash -n`. The `$${…}` template escaping survives
-  intact — `mount-data.sh` renders `${root_disk:=$(basename "$root_src")}`, and
-  the per-key `fetch '…'` calls render one line per object.
+- The cloud-init template was rendered and parsed as YAML across the
+  `hashcat = true`, `hashcat = false`, and `extra_packages` +
+  `extra_cloud_init` combinations.
+- The shell script the template embeds was extracted from the rendered YAML and
+  passes `bash -n`, with the `$${…}` template escaping intact —
+  `mount-data.sh` renders `${root_disk:=$(basename "$root_src")}`.
 - Every package the payload installs is published in Ubuntu 26.04 *resolute*:
   `hashcat 7.1.2+ds1-3` and `clinfo` (universe), `pocl-opencl-icd` (source
   `pocl 6.0-7build1`), `ocl-icd-libopencl1`, `zstd`, `xz-utils`, `tmux` and

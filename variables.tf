@@ -98,67 +98,6 @@ variable "data_mount" {
   }
 }
 
-# --- Wordlist corpus (WORDLIST_* repository variables) ------------------------
-# In CI these arrive as TF_VAR_wordlist_* from the GitHub repository variables
-# and secrets of the same (upper-case) names. They are all-or-nothing: set all
-# six to have cloud-init pull the dictionaries onto hashcat instances, leave all
-# six unset to skip it and upload them yourself. A partial set fails the plan
-# (precondition in main.tf).
-
-variable "wordlist_directory" {
-  description = "Absolute path the dictionaries are downloaded to. Normally <data_mount>/wordlists, so they land on the bulk disk rather than the root filesystem (GitHub variable WORDLIST_DIRECTORY)."
-  type        = string
-  default     = ""
-
-  validation {
-    condition     = var.wordlist_directory == "" || startswith(var.wordlist_directory, "/")
-    error_message = "wordlist_directory must be an absolute path, e.g. /data/wordlists."
-  }
-}
-
-variable "wordlist_endpoint" {
-  description = "Vultr Object Storage endpoint hosting the dictionaries, with or without the https:// scheme, e.g. \"https://ewr1.vultrobjects.com\" (GitHub variable WORDLIST_ENDPOINT)."
-  type        = string
-  default     = ""
-}
-
-variable "wordlist_bucket" {
-  description = "Object storage bucket holding the dictionaries (GitHub variable WORDLIST_BUCKET)."
-  type        = string
-  default     = ""
-}
-
-variable "wordlist_names" {
-  description = <<-EOT
-    Object keys to download, separated by commas or whitespace (GitHub variable
-    WORDLIST_NAMES). A plain string rather than a list so it can be pasted
-    straight into a GitHub repository variable:
-
-      rockyou.txt.gz, corpora/weakpass_4.txt.gz, rules/best64.rule
-
-    Each key keeps its basename on disk, so a prefixed key lands flat in
-    wordlist_directory. Files are stored exactly as downloaded and are not
-    unpacked -- hashcat 6 reads gzip-compressed wordlists natively, and a
-    100 GB dictionary is better left compressed.
-  EOT
-  type        = string
-  default     = ""
-}
-
-variable "wordlist_access_key" {
-  description = "Object storage access key for the wordlist bucket (GitHub secret WORDLIST_ACCESS_KEY). Embedded in cloud-init user data -- treat instance user data as sensitive."
-  type        = string
-  default     = ""
-  sensitive   = true
-}
-
-variable "wordlist_secret_key" {
-  description = "Object storage secret key for the wordlist bucket (GitHub secret WORDLIST_SECRET_KEY). Embedded in cloud-init user data -- treat instance user data as sensitive."
-  type        = string
-  default     = ""
-  sensitive   = true
-}
-
 variable "vultr_rate_limit" {
   description = "Milliseconds the provider waits between Vultr API calls. Vultr allows ~30 calls/second."
   type        = number
@@ -230,8 +169,8 @@ variable "instances" {
     }))
 
     # --- Payload (rendered into cloud-init) ---------------------------------
-    # hashcat = false leaves a plain hardened Ubuntu box: no cracking toolchain,
-    # no data mount, no wordlist download.
+    # hashcat = false leaves a plain hardened Ubuntu box: no cracking toolchain
+    # and no data mount.
     hashcat          = optional(bool)
     extra_packages   = optional(list(string), [])
     extra_cloud_init = optional(string) # raw YAML merged in as top-level keys
