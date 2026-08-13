@@ -4,9 +4,10 @@ OpenTofu-managed Vultr compute instances for running **hashcat against large
 dictionaries** in a home lab, driven entirely from manually-triggered GitHub
 Actions workflows.
 
-A box comes up with hashcat and a working OpenCL runtime and its bulk storage
-formatted and mounted at `/data`, ready for you to upload dictionaries into.
-Rent it by the hour, crack, snapshot, destroy.
+A box comes up with hashcat and a working OpenCL runtime, its bulk storage
+formatted and mounted at `/data`, and two public corpora already pulled down —
+rockyou in the admin user's home, SecLists on the data mount. Rent it by the
+hour, crack, snapshot, destroy.
 
 Five operations, five workflows, all `workflow_dispatch`:
 
@@ -426,13 +427,15 @@ everything on one disk.
 ```
 /data                 the mount point (var.data_mount)
 ├── wordlists/        dictionaries you upload
+├── seclists/         SecLists clone, /usr/share/seclists -> here
 ├── hashes/           target hashes
 ├── rules/            rule files
 └── sessions/         --session restore points
 ```
 
-All four are owned by `var.admin_user`, so runs, potfiles and session restores
-need no sudo.
+The four created directories are owned by `var.admin_user`, so runs, potfiles
+and session restores need no sudo. `rockyou.txt` lands in the admin user's home
+rather than here — at 133 MB it is small enough not to need the bulk disk.
 
 ### Declaring instances
 
@@ -508,8 +511,27 @@ Full option list with defaults and validation rules:
 
 What the payload installs: `hashcat`, `pocl-opencl-icd` and
 `ocl-icd-libopencl1` (the OpenCL runtime and loader — hashcat will not start
-without one), `clinfo`, `tmux`, and the corpus-handling tools `7zip`,
-`pigz`, `xz-utils`, `zstd` and `rsync`.
+without one), `clinfo`, `hcxtools` (the `hcxpcapngtool` front end to hashcat's
+22000/22001 WPA modes), `tmux`, and the corpus-handling tools `7zip`, `pigz`,
+`xz-utils`, `zstd` and `rsync`.
+
+It also fetches two corpora on first boot:
+
+| What | Where | Size |
+|---|---|---|
+| rockyou | `~/rockyou.txt` | 53 MB down, 133 MB extracted |
+| SecLists | `/data/seclists`, symlinked from `/usr/share/seclists` | ~1 GB, `--depth 1` clone |
+
+Both are plain anonymous downloads — no credentials, nothing sensitive in user
+data — and both are controlled by a variable you can set to `""` to skip
+(`rockyou_url`, `seclists_repo` in [variables.tf](variables.tf)).
+
+> **`seclists` is not an Ubuntu package.** `apt install seclists` is a Kali
+> instruction; the name is in no Ubuntu suite at all, so that command fails
+> here. This stack clones it from
+> [upstream](https://github.com/danielmiessler/SecLists) instead, onto the data
+> mount because it is over a gigabyte, and symlinks `/usr/share/seclists` at it
+> so anything expecting Kali's path still resolves.
 
 First, confirm the backend came up. Cloud-init captures `hashcat -I` on first
 boot, precisely so a box whose OpenCL runtime failed still finishes booting and
@@ -527,8 +549,9 @@ devices explicitly.
 
 ### Getting dictionaries onto the box
 
-Nothing is downloaded for you. Cloud-init creates `/data/wordlists` owned by
-the admin user and leaves it empty; how the corpus gets there is up to you.
+rockyou and SecLists arrive on their own (see above). `/data/wordlists` is
+created owned by the admin user and left empty for everything else — how your
+private corpus gets there is up to you.
 
 `rsync` over SSH is the usual answer, and the one worth using for anything
 large — it resumes, so a dropped connection halfway through a 100 GB
@@ -861,9 +884,20 @@ the `~> 2.32` constraint):
 - Every package the payload installs is published in Ubuntu 26.04 *resolute*:
   `hashcat 7.1.2+ds1-3` and `clinfo` (universe), `pocl-opencl-icd` (source
   `pocl 6.0-7build1`), `ocl-icd-libopencl1`, `zstd`, `xz-utils`, `tmux` and
-  `rsync` (main), `pigz` (universe), and `7zip 26.00+dfsg-1`. Checked via the
-  Launchpad API and `packages.ubuntu.com`. The template asks for `7zip` rather
-  than `p7zip-full` because on 26.04 the latter is only a transitional package.
+  `rsync` (main), `pigz` (universe), `7zip 26.00+dfsg-1` and
+  `hcxtools 7.1.0-1` (universe). Checked via the Launchpad API and
+  `packages.ubuntu.com`. The template asks for `7zip` rather than `p7zip-full`
+  because on 26.04 the latter is only a transitional package.
+- **`seclists` is in no Ubuntu suite.** `packages.ubuntu.com/resolute/seclists`
+  returns HTTP 200, but the page body is "No such package" — a soft 404 — and a
+  cross-suite name search returns nothing. `apt install seclists` would fail on
+  this image, so SecLists is cloned from upstream instead.
+- The rockyou URL is live and serves what it claims: it 302s to
+  `download.weakpass.com`, the gzip header carries the original filename
+  `rockyou.txt`, the decompressed head is the canonical list (`123456`,
+  `12345`, `123456789`, `password`, …), and the gzip trailer gives an
+  uncompressed size of 139,921,497 bytes — 133 MB, matching the classic file at
+  a 2.6x ratio off the 53,357,062-byte download.
 
 Carried over from the previous revision of this stack and not re-executed
 against the current config:

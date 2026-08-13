@@ -98,6 +98,50 @@ variable "data_mount" {
   }
 }
 
+# --- Public corpora pulled on first boot -------------------------------------
+# Both are plain anonymous downloads: no credentials, nothing sensitive baked
+# into user data, and both are skipped by setting them to "".
+
+variable "rockyou_url" {
+  description = <<-EOT
+    Gzipped rockyou wordlist, downloaded and extracted into the admin user's
+    home directory as ~/rockyou.txt on hashcat instances.
+
+    Roughly 53 MB on the wire, 134 MB extracted -- small enough for the home
+    directory, unlike the corpora that belong on the data mount. The URL 302s
+    to download.weakpass.com, which is why the fetch follows redirects. Set to
+    "" to skip it.
+  EOT
+  type        = string
+  default     = "https://weakpass.com/download/90/rockyou.txt.gz"
+
+  validation {
+    condition     = var.rockyou_url == "" || can(regex("^https?://", var.rockyou_url))
+    error_message = "rockyou_url must be an http(s) URL, or \"\" to skip the download."
+  }
+}
+
+variable "seclists_repo" {
+  description = <<-EOT
+    SecLists source repository, shallow-cloned to <data_mount>/seclists with
+    /usr/share/seclists symlinked at it.
+
+    SecLists is NOT an Ubuntu package. `apt install seclists` works on Kali,
+    which is where that instruction usually comes from, but the name is in no
+    Ubuntu suite at all and the install would fail -- so it comes from
+    upstream instead. It is over a gigabyte checked out, which is why it lands
+    on the bulk disk rather than the root filesystem, and why the clone is
+    --depth 1. Set to "" to skip it.
+  EOT
+  type        = string
+  default     = "https://github.com/danielmiessler/SecLists.git"
+
+  validation {
+    condition     = var.seclists_repo == "" || can(regex("^(https?://|git@)", var.seclists_repo))
+    error_message = "seclists_repo must be an http(s) or git@ URL, or \"\" to skip the clone."
+  }
+}
+
 variable "vultr_rate_limit" {
   description = "Milliseconds the provider waits between Vultr API calls. Vultr allows ~30 calls/second."
   type        = number

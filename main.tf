@@ -34,6 +34,10 @@ resource "vultr_instance" "this" {
     hashcat      = each.value.hashcat
     data_mount   = var.data_mount
 
+    # Public, anonymous downloads. Either empty string skips that fetch.
+    rockyou_url   = var.rockyou_url
+    seclists_repo = var.seclists_repo
+
     # Vultr only injects ssh_key_ids into root/linuxuser, so the admin user
     # gets the same public keys planted via cloud-init.
     admin_user      = var.admin_user

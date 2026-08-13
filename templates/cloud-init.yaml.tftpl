@@ -49,6 +49,9 @@ packages:
   - pocl-opencl-icd
   - ocl-icd-libopencl1
   - clinfo
+  # WPA/WPA2 capture conversion -- hcxpcapngtool and friends, the usual front
+  # end to hashcat modes 22000/22001.
+  - hcxtools
   # A dictionary run against a large corpus outlives an SSH session.
   - tmux
   # Corpus handling: unpack, repack and move dictionaries around. "7zip", not
@@ -151,6 +154,58 @@ write_files:
         "$MOUNT/hashes" \
         "$MOUNT/rules" \
         "$MOUNT/sessions"
+%{ if rockyou_url != "" || seclists_repo != "" ~}
+
+  - path: /opt/crackbox/fetch-corpus.sh
+    permissions: "0755"
+    content: |
+      #!/usr/bin/env bash
+      set -euo pipefail
+
+      OWNER='${admin_user}'
+      HOME_DIR="/home/$OWNER"
+%{ if rockyou_url != "" ~}
+
+      # rockyou, extracted into the admin user's home. Small enough to live on
+      # the root filesystem: ~53 MB down, ~134 MB on disk. Anything larger
+      # belongs under the data mount instead.
+      ROCKYOU="$HOME_DIR/rockyou.txt"
+
+      if [ -s "$ROCKYOU" ]; then
+        echo "crackbox: $ROCKYOU already present, skipping"
+      else
+        tmp="$(mktemp -d)"
+        trap 'rm -rf "$tmp"' EXIT
+
+        echo "crackbox: fetching rockyou"
+        # -L matters: weakpass.com 302s to download.weakpass.com.
+        curl -fsSL --retry 5 --retry-delay 10 --retry-connrefused \
+          -o "$tmp/rockyou.txt.gz" '${rockyou_url}'
+
+        gunzip -c "$tmp/rockyou.txt.gz" >"$ROCKYOU"
+        chown "$OWNER:$OWNER" "$ROCKYOU"
+      fi
+%{ endif ~}
+%{ if seclists_repo != "" ~}
+
+      # SecLists is not an Ubuntu package -- the name exists on Kali, not in
+      # any Ubuntu suite -- so it comes from upstream. Over a gigabyte checked
+      # out, hence --depth 1 and a home on the data mount rather than the root
+      # filesystem. /usr/share/seclists is symlinked at it because that is
+      # where Kali puts it and where tooling looks.
+      SECLISTS='${data_mount}/seclists'
+
+      if [ -d "$SECLISTS/.git" ]; then
+        echo "crackbox: $SECLISTS already cloned, skipping"
+      else
+        echo "crackbox: cloning SecLists"
+        git clone --depth 1 '${seclists_repo}' "$SECLISTS"
+        chown -R "$OWNER:$OWNER" "$SECLISTS"
+      fi
+
+      ln -sfn "$SECLISTS" /usr/share/seclists
+%{ endif ~}
+%{ endif ~}
 %{ endif ~}
 
 runcmd:
@@ -160,6 +215,11 @@ runcmd:
   - [systemctl, restart, ssh]
 %{ if hashcat ~}
   - [bash, /opt/crackbox/mount-data.sh]
+%{ if rockyou_url != "" || seclists_repo != "" ~}
+  # After mount-data.sh: SecLists is cloned onto the data mount, which has to
+  # exist and be mounted first or a gigabyte lands on the root disk instead.
+  - [bash, /opt/crackbox/fetch-corpus.sh]
+%{ endif ~}
   # Proof that the OpenCL runtime came up and hashcat can see the threads.
   # Recorded rather than asserted: a box whose backend failed should still
   # finish booting so you can log in and read this file.

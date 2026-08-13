@@ -49,8 +49,12 @@ ssh_key_names = [
   "kubuntu26-de",
 ]
 
-# Dictionaries are uploaded by hand -- cloud-init creates /data/wordlists and
-# leaves it empty. See "Getting dictionaries onto the box" in the README.
+# Two public corpora come down on first boot: rockyou extracted into the admin
+# user's home, and SecLists shallow-cloned onto the data mount. Both are
+# variables with defaults (see variables.tf) -- set rockyou_url or
+# seclists_repo to "" to skip either. Anything private still gets uploaded by
+# hand into /data/wordlists, which cloud-init creates empty. See "Getting
+# dictionaries onto the box" in the README.
 
 instances = {
   crack01 = {}
