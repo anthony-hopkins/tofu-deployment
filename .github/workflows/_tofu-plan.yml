@@ -46,6 +46,12 @@ jobs:
       VULTR_API_KEY: ${{ secrets.VULTR_API_KEY }}
       AWS_ACCESS_KEY_ID: ${{ secrets.TFSTATE_ACCESS_KEY }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.TFSTATE_SECRET_KEY }}
+      # The box size lives in the VULTR_PLAN repository variable, not in the
+      # committed tfvars, and there is no default -- an unset VULTR_PLAN makes
+      # the plan fail loudly rather than quietly sizing the box. It only needs
+      # to reach the plan: Apply and Destroy run `tofu apply` against the saved
+      # plan file, which already has this value baked in.
+      TF_VAR_vultr_plan: ${{ vars.VULTR_PLAN }}
       TF_IN_AUTOMATION: "1"
 
     steps:

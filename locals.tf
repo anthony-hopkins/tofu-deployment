@@ -8,7 +8,7 @@ locals {
   effective = {
     for name, cfg in var.instances : name => {
       # --- placement -------------------------------------------------------
-      plan   = coalesce(cfg.plan, var.defaults.plan)
+      plan   = coalesce(cfg.plan, var.vultr_plan)
       region = coalesce(cfg.region, var.defaults.region)
 
       # --- image -----------------------------------------------------------

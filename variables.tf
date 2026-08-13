@@ -21,20 +21,42 @@ variable "dns_zone" {
   default     = "dhs-labs.us"
 }
 
+variable "vultr_plan" {
+  description = <<-EOT
+    Vultr plan ID every instance inherits unless it sets its own `plan`.
+
+    Required, with no default on purpose: the box size is a deployment setting,
+    not a committed constant, and an unset value should fail rather than quietly
+    size the box for you. CI passes the VULTR_PLAN repository variable in as
+    TF_VAR_vultr_plan; a local run must export TF_VAR_vultr_plan (or answer the
+    prompt) -- e.g. `export TF_VAR_vultr_plan=vx1-g-32c-128g-1920s`.
+
+    The usual value is 32 vCPU / 128 GB RAM / 1920 GB storage, AMD, no GPU. The
+    -1920s suffix is what buys the disk -- the bare vx1-g-32c-128g ships a 1 GB
+    boot disk and expects block storage attached separately, with nowhere to
+    put a dictionary corpus. See "About that plan" in the README before
+    choosing one, and run `make plans REGION=sea` for the catalogue.
+  EOT
+  type        = string
+
+  validation {
+    condition     = var.vultr_plan != ""
+    error_message = "vultr_plan cannot be empty. Set the VULTR_PLAN repository variable (or export TF_VAR_vultr_plan). Run `make plans REGION=sea` for the catalogue."
+  }
+}
+
 variable "defaults" {
   description = <<-EOT
     The baseline every instance inherits unless it overrides the field.
 
     Because these are defaults rather than per-instance settings, changing one
-    here re-plans every instance that has not overridden it. plan and region
-    changes are in-place resizes/moves where Vultr allows them; changing
-    os_name rebuilds.
+    here re-plans every instance that has not overridden it. A region change is
+    an in-place move where Vultr allows it; changing os_name rebuilds. The plan
+    is not a default -- it comes from var.vultr_plan (the VULTR_PLAN repository
+    variable in CI).
   EOT
 
   type = object({
-    # 32 vCPU / 128 GB RAM / 1920 GB storage, AMD. See instances.auto.tfvars
-    # for why this is the -1920s variant and not the bare vx1-g-32c-128g.
-    plan        = optional(string, "vx1-g-32c-128g-1920s")
     region      = optional(string, "sea")                  # Seattle
     os_name     = optional(string, "Ubuntu 26.04 LTS x64") # os_id 2760
     user_scheme = optional(string, "root")
@@ -51,8 +73,8 @@ variable "defaults" {
   }
 
   validation {
-    condition     = var.defaults.plan != "" && var.defaults.region != ""
-    error_message = "defaults.plan and defaults.region cannot be empty."
+    condition     = var.defaults.region != ""
+    error_message = "defaults.region cannot be empty."
   }
 
   validation {

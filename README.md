@@ -241,6 +241,7 @@ Variables:
 | `TFSTATE_ENDPOINT` | `https://ewr1.vultrobjects.com` | Must match `endpoints.s3` in your generated `backend.hcl`. |
 | `PROJECT` | `crackbox` | Optional. Must match `project` in tfvars. |
 | `TOFU_VERSION` | `1.12.5` | Optional. Defaults to 1.12.5. |
+| `VULTR_PLAN` | `vx1-g-32c-128g-1920s` | **Required.** The plan every instance inherits. No default — an unset value fails the plan. See [About that plan](#about-that-plan). |
 
 Dictionaries are not configured here — you upload them yourself once the box
 is up. See [Getting dictionaries onto the
@@ -256,6 +257,7 @@ gh secret set CLOUDFLARE_API_TOKEN   # optional: automatic A/AAAA record sync
 gh variable set TFSTATE_BUCKET   --body crackbox-tfstate
 gh variable set TFSTATE_REGION   --body us-east-1
 gh variable set TFSTATE_ENDPOINT --body https://ewr1.vultrobjects.com
+gh variable set VULTR_PLAN       --body vx1-g-32c-128g-1920s   # required: the box size
 ```
 
 ### Step 5 — Environments (the approval gate)
@@ -338,8 +340,9 @@ If all five pass, the system works.
 
 ### Step 9 — Switch to the real baseline
 
-Drop the overrides so `crack01` inherits `var.defaults`
-(`vx1-g-32c-128g-1920s` in `sea`), or set them to whatever you actually want:
+Drop the overrides so `crack01` inherits the baseline — `var.vultr_plan`
+(`vx1-g-32c-128g-1920s`, or whatever `VULTR_PLAN` is set to) in `sea` — or set
+them to whatever you actually want:
 
 ```hcl
 instances = {
@@ -371,11 +374,15 @@ expects so you can reconcile by hand.
 
 ## Defining the fleet
 
-Every instance inherits a single baseline:
+Every instance inherits a single baseline. The **plan** is not part of it — it
+is a required setting with no default, `var.vultr_plan` (the `VULTR_PLAN`
+repository variable in CI, `TF_VAR_vultr_plan` locally). The usual value is
+`vx1-g-32c-128g-1920s`: 32 vCPU, 128 GB, 1920 GB, AMD, 9 TB transfer,
+$892.79/mo. See [About that plan](#about-that-plan). The rest live in
+`defaults`:
 
 | `defaults` field | Value | |
 |---|---|---|
-| `plan` | `vx1-g-32c-128g-1920s` | 32 vCPU, 128 GB, 1920 GB, AMD, 9 TB transfer, $892.79/mo |
 | `region` | `sea` | Seattle |
 | `os_name` | `Ubuntu 26.04 LTS x64` | os_id 2760 |
 | `user_scheme` | `root` | |
@@ -464,9 +471,10 @@ instances = {
 }
 ```
 
-Change the baseline itself in the `defaults` block — but note that changing a
-default re-plans every instance that has not overridden it. `plan` and `region`
-changes are resizes/moves where Vultr allows them; changing `os_name` rebuilds.
+Change the baseline itself in the `defaults` block, or the box size through the
+`VULTR_PLAN` variable (`var.vultr_plan`) — but note that either re-plans every
+instance that has not overridden it. `plan` and `region` changes are
+resizes/moves where Vultr allows them; changing `os_name` rebuilds.
 
 **Naming.** With `dns_zone` set, hostname and label default to
 `<key>.<dns_zone>` — `crack01.dhs-labs.us`. Set `dns_zone = ""` to get
@@ -751,7 +759,12 @@ make snapshots
 
 `make check` works with no credentials. Everything else needs
 `VULTR_API_KEY`, plus `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` set to your
-Object Storage keys for anything that reads state.
+Object Storage keys for anything that reads state. `make plan` and `make apply`
+also need the plan, which has no default — export it first:
+
+```bash
+export TF_VAR_vultr_plan=vx1-g-32c-128g-1920s   # what CI reads from VULTR_PLAN
+```
 
 ---
 
