@@ -32,7 +32,15 @@ defaults = {
   user_scheme = "root"
   hashcat     = true
   enable_ipv6 = true
-  backups     = false
+
+  # Vultr automatic backups are a percentage surcharge on the instance price,
+  # charged continuously for as long as the box exists. On a plan this size
+  # that is the single easiest line item to waste money on, and it buys
+  # scheduled images of a machine that is meant to live for the length of one
+  # cracking run. Snapshots cover the same need on demand -- take one before a
+  # risky change or a destroy, keep the ones worth keeping, prune the rest.
+  # See "Snapshots and restore" in the README.
+  backups = false
 }
 
 # SSH keys must already exist in your Vultr account (Account -> SSH Keys).

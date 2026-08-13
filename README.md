@@ -682,6 +682,36 @@ Restores, on the other hand, *are* declarative:
 Descriptions follow `<project>/<instance>/<UTC timestamp>`, which is what
 `list` and `prune` key off.
 
+### Snapshots versus automatic backups
+
+`backups` is `false` in the baseline, deliberately. Vultr automatic backups are
+a percentage surcharge on the instance price billed continuously, and they
+buy scheduled images of a box that is meant to exist for the length of one
+cracking run. Snapshots do the same job on demand, and **3 · Destroy** already
+defaults `snapshot_first` to on, so the routine teardown captures the disk
+without you having to remember.
+
+> **Snapshots outlive the instance, and keep billing.** This is the part that
+> catches people out: destroying the box stops the hourly compute charge, but
+> every snapshot you left behind is still stored and still charged, and a
+> snapshot of a box whose data disk is full of dictionaries is not small.
+> "I destroyed it, so I am not paying" is only true once the snapshots are
+> pruned too.
+
+So the cost discipline is two-sided — destroy the box *and* keep the snapshot
+count down:
+
+```bash
+make snapshots                 # what exists right now
+make prune                     # dry run, keeps the 3 newest per instance
+make prune KEEP=1              # dry run, keeps only the newest
+bash scripts/snapshot.sh prune --keep 1 --yes    # actually delete
+```
+
+`prune` defaults to a dry run and never deletes a snapshot whose ID appears in
+a `.tfvars` file, since that is a live restore target. Workflow **4 · Snapshot**
+exposes the same thing with an `older_than` filter.
+
 ---
 
 ## Local use
